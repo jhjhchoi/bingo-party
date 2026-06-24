@@ -306,11 +306,13 @@ socket.on('game:end', (d) => {
 
 function renderLeaderboard(r){
   const sorted = [...r.players].sort((a,b)=> (b.lines-a.lines) || a.name.localeCompare(b.name));
-  $('leaderboard').innerHTML = sorted.map((p,i)=>
-    `<div class="lb-row"><span style="width:22px">${p.won?'🏆':(i+1)}</span>
-     <span class="lb-name">${escapeHtml(p.name)}${p.reach&&!p.won?' <span class="reach-badge">🔥 리치</span>':''}</span>
-     <span class="lb-lines">${p.lines}줄</span></div>`
-  ).join('') || '<p class="muted">참가자 없음</p>';
+  $('leaderboard').innerHTML = sorted.map((p,i)=>{
+    const isTurn = (r.mode === 'turns' && p.pid === r.currentPid);
+    const bg = isTurn ? ' style="background:rgba(46,204,113,.18);box-shadow:inset 0 0 0 1px #2ecc71;border-radius:8px;"' : '';
+    return `<div class="lb-row"${bg}><span style="width:22px">${isTurn ? '▶' : (p.won?'🏆':(i+1))}</span>
+     <span class="lb-name">${escapeHtml(p.name)}${isTurn?' <span class="turn-badge">차례</span>':''}${p.reach&&!p.won?' <span class="reach-badge">🔥 리치</span>':''}</span>
+     <span class="lb-lines">${p.lines}줄</span></div>`;
+  }).join('') || '<p class="muted">참가자 없음</p>';
 }
 
 function escapeHtml(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }

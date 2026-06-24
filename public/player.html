@@ -108,7 +108,7 @@
 <script>
 const socket = io();
 const $ = (id) => document.getElementById(id);
-let state = { code: null, pid: null, name: '', mode: 'numbers', card: null, calledSet: new Set(), needLines: 3, intervalSec: 4, won: false, myTurn: false };
+let state = { code: null, pid: null, name: '', mode: 'numbers', card: null, calledSet: new Set(), needLines: 3, intervalSec: 4, won: false, myTurn: false, currentPid: null };
 // number-based modes (75-ball cards): auto-call 'numbers' and turn-based 'turns'
 function isNumberMode(){ return state.mode === 'numbers' || state.mode === 'turns'; }
 
@@ -351,11 +351,14 @@ function renderMiniBoard(players){
   const sorted = [...players].sort((a,b)=> (b.lines-a.lines) || a.name.localeCompare(b.name));
   $('miniBoard').innerHTML = sorted.map((p,i)=>{
     const me = p.pid === state.pid;
+    const isTurn = (state.mode === 'turns' && p.pid === state.currentPid);
     const rank = p.won ? '🏆' : (i+1);
-    return `<div class="lb-row" style="${me?'background:rgba(91,140,255,.15);border-radius:8px;':''}">
-      <span style="width:22px;text-align:center">${rank}</span>
+    const bg = isTurn ? 'background:rgba(46,204,113,.18);box-shadow:inset 0 0 0 1px #2ecc71;border-radius:8px;'
+             : (me ? 'background:rgba(91,140,255,.15);border-radius:8px;' : '');
+    return `<div class="lb-row" style="${bg}">
+      <span style="width:22px;text-align:center">${isTurn ? '▶' : rank}</span>
       <span class="dot ${p.online?'':'off'}"></span>
-      <span class="lb-name">${escapeHtml(p.name)}${me?' <span class="muted">(나)</span>':''}${p.reach&&!p.won?' <span class="reach-badge">🔥</span>':''}</span>
+      <span class="lb-name">${escapeHtml(p.name)}${me?' <span class="muted">(나)</span>':''}${isTurn?' <span class="turn-badge">차례</span>':''}${p.reach&&!p.won?' <span class="reach-badge">🔥</span>':''}</span>
       <span class="lb-lines">${p.lines}줄</span></div>`;
   }).join('') || '<p class="muted">참가자 없음</p>';
 }
@@ -363,6 +366,7 @@ function escapeHtml(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&
 
 // ---- socket events ----
 socket.on('room:update', (r) => {
+  state.currentPid = r.currentPid || null;
   renderMiniBoard(r.players);
   if (r.status === 'ended') stopCountdown();
   // turn-based: sync my-turn state if we missed a game:turn (e.g. reconnect)
@@ -379,6 +383,7 @@ socket.on('room:update', (r) => {
 socket.on('player:card', (d) => { state.card = d.card; state.mode = d.mode; state.won = false; state.myTurn = false; daubed = new Set(); $('reachBanner').classList.add('hidden'); renderBoard(); show('gameView'); if (state.mode !== 'turns') startCountdown(state.intervalSec, '다음 호출'); });
 socket.on('game:call', (d) => { refreshCalled(d.called); dropBall(d.value); if (state.mode !== 'turns') startCountdown(state.intervalSec, '다음 호출'); sayCall(d.value); });
 socket.on('game:turn', (d) => {
+  state.currentPid = d.pid;
   state.myTurn = (d.pid === state.pid);
   updateTurnBanner(d.name);
   document.querySelectorAll('#board .cell').forEach(cellState);
