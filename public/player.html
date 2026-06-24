@@ -70,7 +70,9 @@
         <button id="pVoiceBtn" class="mini-toggle">🔊 음성</button>
         <span class="pill" id="countdownPill"><span id="cdLabel">다음 호출</span> <b id="countdown">–</b>초</span>
       </div>
-      <div class="bigcall" id="bigCall">–</div>
+      <div class="ball-stage">
+        <div class="ball" id="ball"><span id="bigCall">–</span></div>
+      </div>
     </div>
     <div id="bingoHeader" class="bingo-header hidden"><span>B</span><span>I</span><span>N</span><span>G</span><span>O</span></div>
     <div class="board" id="board"></div>
@@ -226,6 +228,15 @@ function setPVoice(on){
 }
 $('pVoiceBtn').onclick = () => setPVoice(window.Voice ? !Voice.enabled() : false);
 
+// ---- ball drop (same as host) ----
+const BALL_COLORS = { B:'#5b8cff', I:'#ff5e7e', N:'#2ecc71', G:'#ffb938', O:'#b07bff' };
+function dropBall(v){
+  const ball = $('ball'); if (!ball) return;
+  ball.style.background = BALL_COLORS[letterFor(v)] || 'var(--gold)';
+  $('bigCall').textContent = label(v);
+  ball.classList.remove('drop'); void ball.offsetWidth; ball.classList.add('drop');
+}
+
 // ---- board ----
 let daubed = new Set(); // values the player has tapped to mark (strings)
 function cellState(div){
@@ -364,7 +375,7 @@ socket.on('room:update', (r) => {
   }
 });
 socket.on('player:card', (d) => { state.card = d.card; state.mode = d.mode; state.won = false; state.myTurn = false; daubed = new Set(); $('reachBanner').classList.add('hidden'); renderBoard(); show('gameView'); if (state.mode !== 'turns') startCountdown(state.intervalSec, '다음 호출'); });
-socket.on('game:call', (d) => { refreshCalled(d.called); if (state.mode !== 'turns') startCountdown(state.intervalSec, '다음 호출'); sayCall(d.value); });
+socket.on('game:call', (d) => { refreshCalled(d.called); dropBall(d.value); if (state.mode !== 'turns') startCountdown(state.intervalSec, '다음 호출'); sayCall(d.value); });
 socket.on('game:turn', (d) => {
   state.myTurn = (d.pid === state.pid);
   updateTurnBanner(d.name);
