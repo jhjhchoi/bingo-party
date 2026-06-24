@@ -222,7 +222,7 @@ function enterPlay(){
 
 $('resetBtn').onclick = () => {
   socket.emit('host:reset', (res) => {
-    if (res && res.ok) { endTurnUI(); $('winBox').classList.add('hidden'); $('callCaption').textContent='방금 호출'; $('bigCall').textContent='–'; enterLobby(room); }
+    if (res && res.ok) { endTurnUI(); if (window.Celebrate) Celebrate.hide(); $('winBox').classList.add('hidden'); $('callCaption').textContent='방금 호출'; $('bigCall').textContent='–'; enterLobby(room); }
   });
 };
 
@@ -279,7 +279,7 @@ function endTurnUI(){ if (hostTurnTimer) clearInterval(hostTurnTimer); $('turnBo
 socket.on('game:winners', (w) => {
   $('winBox').classList.remove('hidden');
   $('winBox').textContent = '🏆 우승: ' + w.map(x=>`${x.name} (${x.atCall}회만에 ${x.lines}줄)`).join(', ');
-  if (window.Sound) Sound.win();
+  if (window.Celebrate) Celebrate.winner(w.map(x=>x.name), '우승을 축하합니다 🎉');
   speak('Bingo! Bingo! We have a winner!');
 });
 

@@ -47,6 +47,59 @@ window.Sound = (function () {
   };
 })();
 
+// Shared full-screen winner celebration (overlay + confetti) for host & player.
+window.Celebrate = (function () {
+  let overlay, canvas, raf, running = false;
+  function build() {
+    overlay = document.createElement('div');
+    overlay.className = 'win-overlay';
+    overlay.innerHTML =
+      '<canvas class="win-confetti"></canvas>' +
+      '<div class="win-card">' +
+        '<div class="win-trophy">🏆</div>' +
+        '<div class="win-title">BINGO!</div>' +
+        '<div class="win-names"></div>' +
+        '<div class="win-sub"></div>' +
+        '<button class="win-close">닫기</button>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    canvas = overlay.querySelector('.win-confetti');
+    overlay.querySelector('.win-close').onclick = hide;
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) hide(); });
+  }
+  function confetti() {
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+    const colors = ['#ff5e7e', '#5b8cff', '#ffce54', '#2ecc71', '#b07bff', '#fff'];
+    const parts = Array.from({ length: 220 }, () => ({
+      x: Math.random() * canvas.width, y: -20 - Math.random() * canvas.height,
+      r: 5 + Math.random() * 9, c: colors[(Math.random() * colors.length) | 0],
+      vy: 2 + Math.random() * 5, vx: -2.5 + Math.random() * 5,
+      rot: Math.random() * 6, vr: -0.2 + Math.random() * 0.4
+    }));
+    (function loop() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      parts.forEach((p) => {
+        p.y += p.vy; p.x += p.vx; p.vy += 0.04; p.rot += p.vr;
+        if (p.y > canvas.height + 20) { p.y = -20; p.x = Math.random() * canvas.width; p.vy = 2 + Math.random() * 5; }
+        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+        ctx.fillStyle = p.c; ctx.fillRect(-p.r / 2, -p.r / 2, p.r, p.r); ctx.restore();
+      });
+      if (running) raf = requestAnimationFrame(loop);
+    })();
+  }
+  function show(names, sub) {
+    if (!overlay) build();
+    overlay.querySelector('.win-names').textContent = (names || []).join(', ');
+    overlay.querySelector('.win-sub').textContent = sub || '우승을 축하합니다 🎉';
+    if (running) return; // already celebrating — just refresh names
+    overlay.classList.add('show'); running = true; confetti();
+    if (window.Sound) Sound.win();
+  }
+  function hide() { running = false; if (raf) cancelAnimationFrame(raf); if (overlay) overlay.classList.remove('show'); }
+  return { winner: show, hide };
+})();
+
 // Shared voice caller (speech synthesis) — used by both host and player pages.
 window.Voice = (function () {
   let on = true, voices = [];

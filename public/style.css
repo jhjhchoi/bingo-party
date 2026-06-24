@@ -150,6 +150,36 @@ button.go { background: linear-gradient(135deg, var(--accent), #ff8a5e); font-si
 .bingo-header span:nth-child(4) { color: #ffb938; text-shadow: 0 2px 10px rgba(255,185,56,.35); }
 .bingo-header span:nth-child(5) { color: #b07bff; text-shadow: 0 2px 10px rgba(176,123,255,.35); }
 .turn-badge { background: #2ecc71; color: #fff; font-size: 11px; font-weight: 800; padding: 2px 7px; border-radius: 999px; }
+
+/* ---- winner celebration overlay ---- */
+.win-overlay {
+  position: fixed; inset: 0; z-index: 100; display: none;
+  align-items: center; justify-content: center;
+  background: rgba(8,10,26,.8); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+.win-overlay.show { display: flex; animation: winfade .3s ease; }
+@keyframes winfade { from { opacity: 0; } to { opacity: 1; } }
+.win-confetti { position: absolute; inset: 0; pointer-events: none; }
+.win-card { position: relative; text-align: center; padding: 24px; max-width: 92vw; }
+.win-trophy { font-size: clamp(64px, 18vw, 128px); line-height: 1; animation: trophypop .6s cubic-bezier(.2,1.5,.4,1) both; }
+@keyframes trophypop { 0% { transform: scale(0) rotate(-25deg); } 100% { transform: scale(1) rotate(0); } }
+.win-title {
+  font-size: clamp(44px, 15vw, 100px); font-weight: 900; letter-spacing: 2px; line-height: 1; margin-top: 4px;
+  background: linear-gradient(100deg, var(--gold), var(--accent) 60%, var(--accent2));
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; color: transparent;
+  animation: titlepop .5s ease .1s both;
+}
+@keyframes titlepop { from { transform: scale(.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.win-names {
+  margin-top: 16px; font-size: clamp(30px, 10vw, 72px); font-weight: 900; color: #fff; line-height: 1.1;
+  text-shadow: 0 4px 28px rgba(255,94,126,.6); animation: namepop .55s ease .25s both;
+}
+@keyframes namepop { from { transform: translateY(24px) scale(.9); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
+.win-sub { margin-top: 14px; font-size: clamp(15px, 4.5vw, 22px); color: var(--text); opacity: .85; }
+.win-close {
+  margin-top: 26px; width: auto; padding: 13px 32px; border-radius: 999px;
+  background: var(--card); border: 1px solid var(--line); color: var(--text); font-weight: 700;
+}
 .cell.hot {
   cursor: pointer; border-color: var(--gold); color: var(--gold);
   box-shadow: 0 0 0 2px var(--gold), 0 0 16px rgba(255,206,84,.55);

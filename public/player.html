@@ -291,8 +291,7 @@ function updateLines(lines, won){
     state.won = true;
     $('reachBanner').classList.add('hidden');
     $('winBanner').classList.remove('hidden');
-    fireConfetti();
-    if (window.Sound) Sound.win();
+    // big celebration is driven by the shared game:winners event (Celebrate overlay)
   }
 }
 function updateReach(reach, waiting){
@@ -407,13 +406,16 @@ socket.on('player:reach', (d) => {
 socket.on('game:winners', (w) => showWinners(w));
 socket.on('reaction', (d) => floatEmoji(d.emoji));
 socket.on('player:preview', (d) => { state.card = d.card; state.won = false; daubed = new Set(); renderPreview(); $('lobbyCard').classList.remove('hidden'); });
-socket.on('game:reset', () => { toast('새 게임을 준비합니다.'); daubed = new Set(); state.won = false; state.myTurn = false; stopCountdown(); show('lobbyView'); $('winBanner').classList.add('hidden'); $('reachBanner').classList.add('hidden'); $('turnBanner').classList.add('hidden'); $('lobbyCard').classList.add('hidden'); });
+socket.on('game:reset', () => { toast('새 게임을 준비합니다.'); daubed = new Set(); state.won = false; state.myTurn = false; if (window.Celebrate) Celebrate.hide(); stopCountdown(); show('lobbyView'); $('winBanner').classList.add('hidden'); $('reachBanner').classList.add('hidden'); $('turnBanner').classList.add('hidden'); $('lobbyCard').classList.add('hidden'); });
 socket.on('game:end', (d) => { stopCountdown(); state.myTurn = false; $('turnBanner').classList.add('hidden'); if (state.card) document.querySelectorAll('#board .cell').forEach(cellState); if (d.winners && d.winners.length) showWinners(d.winners); });
 
 function showWinners(winners){
-  const mine = winners.find(w => w.pid === state.pid);
-  if (mine) { $('winBanner').textContent = '🎉 빙고! 우승을 축하합니다!'; $('winBanner').classList.remove('hidden'); fireConfetti(); }
-  else { toast('🏆 우승자: ' + winners.map(w=>w.name).join(', ')); }
+  if (!winners || !winners.length) return;
+  const names = winners.map(w => w.name);
+  const mine = winners.some(w => w.pid === state.pid);
+  if (mine) { state.won = true; $('winBanner').classList.remove('hidden'); }
+  if (window.Celebrate) Celebrate.winner(names, mine ? '🎉 축하합니다! 당신이 우승했어요!' : '우승을 축하합니다 🎉');
+  else toast('🏆 우승자: ' + names.join(', '));
 }
 
 // reconnect: rejoin automatically
