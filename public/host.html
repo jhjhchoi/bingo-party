@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>빙고 - 호스트</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<div class="wrap">
+
+  <!-- SETUP -->
+  <div id="setupView" class="card">
+    <div class="center" style="margin-bottom:10px"><div class="title-emoji">🎙️</div><h1>호스트 설정</h1></div>
+    <label>게임 모드</label>
+    <select id="mode">
+      <option value="numbers">숫자 빙고 (1~100)</option>
+      <option value="words">커스텀 단어 빙고</option>
+    </select>
+
+    <div id="wordOpts" class="hidden">
+      <label>카테고리 (참가자에게 안내)</label>
+      <input id="category" placeholder="예: 좋아하는 음식, 회사 밈, 동물…" maxlength="60" />
+      <label>참가자 1인당 입력 단어 수</label>
+      <select id="wordsPerPlayer">
+        <option>2</option><option selected>3</option><option>4</option><option>5</option>
+      </select>
+      <p class="muted" style="font-size:13px">※ 전체 고유 단어가 25개 이상이어야 시작할 수 있습니다.</p>
+    </div>
+
+    <div class="grid2">
+      <div>
+        <label>자동 호출 간격 (초)</label>
+        <select id="intervalSec"><option>2</option><option>3</option><option selected>4</option><option>5</option><option>7</option><option>10</option></select>
+      </div>
+      <div>
+        <label>우승 조건 (완성 줄 수)</label>
+        <select id="linesToWin"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select>
+      </div>
+    </div>
+    <div style="height:14px"></div>
+    <button class="go" id="createBtn">방 만들기 🎲</button>
+  </div>
+
+  <!-- LOBBY / SHARE -->
+  <div id="lobbyView" class="hidden">
+    <div class="card center">
+      <p class="muted" style="margin:0">참가 코드</p>
+      <div class="code-big" id="codeBig">----</div>
+      <div id="qr" class="qrbox" style="margin:14px auto"></div>
+      <p class="muted" id="joinUrl" style="font-size:13px;word-break:break-all"></p>
+      <p class="muted" style="font-size:13px">QR을 스캔하거나 위 주소 + 코드로 접속</p>
+    </div>
+
+    <div id="collectInfo" class="card hidden">
+      <h3>단어 수집 현황</h3>
+      <div class="statline"><span>모인 고유 단어</span><span class="lb-lines"><b id="uniqWords">0</b> / 25</span></div>
+      <p class="muted" style="font-size:13px">25개 이상 모이면 시작할 수 있습니다.</p>
+    </div>
+
+    <div class="card">
+      <div class="statline">
+        <h3 style="margin:0">참가자 <span id="pCount">0</span>명</h3>
+        <span class="pill" id="modePill"></span>
+      </div>
+      <div id="players"></div>
+    </div>
+
+    <button class="go" id="startBtn">게임 시작 ▶</button>
+  </div>
+
+  <!-- PLAY (project this on the big screen) -->
+  <div id="playView" class="hidden">
+    <div id="winBox" class="banner hidden"></div>
+    <div class="card center" style="padding:14px">
+      <div class="muted">방금 호출</div>
+      <div class="bigcall" id="bigCall">–</div>
+      <div class="muted" style="font-size:13px">총 <span id="calledCount">0</span>회 호출 · 방 <b id="codeSmall"></b></div>
+    </div>
+    <div class="card">
+      <h3>🏆 리더보드</h3>
+      <div id="leaderboard"></div>
+    </div>
+    <div class="card">
+      <div class="muted" style="font-size:13px;margin-bottom:6px">호출된 항목</div>
+      <div class="called-list" id="calledList"></div>
+    </div>
+    <div class="row">
+      <button class="alt" id="resetBtn">새 게임 준비 🔄</button>
+    </div>
+  </div>
+
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<script>
+const socket = io();
+const $ = (id) => document.getElementById(id);
+let room = null;
+
+$('mode').onchange = () => $('wordOpts').classList.toggle('hidden', $('mode').value !== 'words');
+
+// restore host session
+const savedCode = sessionStorage.getItem('hostCode');
+
+$('createBtn').onclick = () => {
+  const cfg = {
+    mode: $('mode').value,
+    intervalSec: $('intervalSec').value,
+    linesToWin: $('linesToWin').value,
+    wordsPerPlayer: $('wordsPerPlayer').value,
+    category: $('category').value,
+  };
+  socket.emit('host:create', cfg, (res) => {
+    if (!res || !res.ok) return alert('방 생성 실패');
+    sessionStorage.setItem('hostCode', res.room.code);
+    enterLobby(res.room);
+  });
+};
+
+function enterLobby(r){
+  room = r;
+  $('setupView').classList.add('hidden');
+  $('playView').classList.add('hidden');
+  $('lobbyView').classList.remove('hidden');
+  $('codeBig').textContent = r.code;
+  $('codeSmall').textContent = r.code;
+  const base = location.origin;
+  const url = base + '/player.html?code=' + r.code;
+  $('joinUrl').textContent = url;
+  $('qr').innerHTML = '';
+  new QRCode($('qr'), { text: url, width: 200, height: 200 });
+  $('modePill').textContent = r.mode === 'words' ? '단어 모드' : '숫자 모드';
+  $('collectInfo').classList.toggle('hidden', r.mode !== 'words');
+  renderRoom(r);
+}
+
+function renderRoom(r){
+  room = r;
+  $('pCount').textContent = r.players.length;
+  $('players').innerHTML = r.players.map(p =>
+    `<div class="lb-row"><span class="dot ${p.online?'':'off'}"></span>
+     <span class="lb-name">${escapeHtml(p.name)}</span>
+     ${r.mode==='words'?`<span class="muted">${p.wordCount}단어</span>`:''}</div>`
+  ).join('') || '<p class="muted">아직 참가자가 없습니다.</p>';
+
+  if (r.mode === 'words' && r.uniqueWords != null) {
+    $('uniqWords').textContent = r.uniqueWords;
+    $('startBtn').disabled = r.status === 'collecting' && r.uniqueWords < 25;
+  }
+}
+
+$('startBtn').onclick = () => {
+  socket.emit('host:start', (res) => {
+    if (!res || !res.ok) {
+      if (res && res.error === 'need-words') return alert(`고유 단어가 부족합니다. (현재 ${res.have} / 25개 필요)`);
+      if (res && res.error === 'no-players') return alert('참가자가 없습니다.');
+      return alert('시작할 수 없습니다.');
+    }
+    enterPlay();
+  });
+};
+
+function enterPlay(){
+  $('lobbyView').classList.add('hidden');
+  $('playView').classList.remove('hidden');
+}
+
+$('resetBtn').onclick = () => {
+  socket.emit('host:reset', (res) => {
+    if (res && res.ok) { $('winBox').classList.add('hidden'); $('bigCall').textContent='–'; enterLobby(room); }
+  });
+};
+
+socket.on('room:update', (r) => {
+  if (!room) return;
+  // update uniq words count for words mode
+  renderRoom(r);
+  renderLeaderboard(r);
+  if (r.status === 'playing' && $('playView').classList.contains('hidden')) enterPlay();
+  $('calledCount').textContent = r.called.length;
+  $('calledList').innerHTML = r.called.map(v=>`<span class="chip">${v}</span>`).join('');
+});
+
+socket.on('game:call', (d) => {
+  $('bigCall').textContent = d.value;
+  $('calledCount').textContent = d.called.length;
+  $('calledList').innerHTML = d.called.map(v=>`<span class="chip">${v}</span>`).join('');
+});
+
+socket.on('game:winners', (w) => {
+  $('winBox').classList.remove('hidden');
+  $('winBox').textContent = '🏆 우승: ' + w.map(x=>`${x.name} (${x.atCall}회만에 ${x.lines}줄)`).join(', ');
+});
+socket.on('game:end', (d) => {
+  if (d.winners && d.winners.length) {
+    $('winBox').classList.remove('hidden');
+    $('winBox').textContent = '🏆 우승: ' + d.winners.map(x=>x.name).join(', ');
+  }
+});
+
+function renderLeaderboard(r){
+  const sorted = [...r.players].sort((a,b)=> (b.lines-a.lines) || a.name.localeCompare(b.name));
+  $('leaderboard').innerHTML = sorted.map((p,i)=>
+    `<div class="lb-row"><span style="width:22px">${p.won?'🏆':(i+1)}</span>
+     <span class="lb-name">${escapeHtml(p.name)}</span>
+     <span class="lb-lines">${p.lines}줄</span></div>`
+  ).join('') || '<p class="muted">참가자 없음</p>';
+}
+
+function escapeHtml(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// host reconnect
+socket.on('connect', () => {
+  if (savedCode && !room) {
+    socket.emit('host:rejoin', savedCode, (res) => {
+      if (res && res.ok) {
+        if (res.room.status === 'playing' || res.room.status === 'ended') { enterLobby(res.room); enterPlay(); renderLeaderboard(res.room); }
+        else enterLobby(res.room);
+      }
+    });
+  }
+});
+</script>
+</body>
+</html>

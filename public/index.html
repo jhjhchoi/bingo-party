@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>🎉 빙고 파티</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<div class="wrap">
+  <div class="center" style="margin: 24px 0 8px;">
+    <div class="title-emoji">🎉</div>
+    <h1>빙고 파티</h1>
+    <p class="muted">휴대폰으로 참여하는 실시간 빙고 게임</p>
+  </div>
+
+  <div class="card">
+    <h3>참가하기</h3>
+    <label>방 코드</label>
+    <input id="code" placeholder="예: ABCD" maxlength="4" autocapitalize="characters" style="text-transform:uppercase;" />
+    <label>닉네임</label>
+    <input id="name" placeholder="이름을 입력하세요" maxlength="20" />
+    <div style="height:12px"></div>
+    <button class="go" id="joinBtn">게임 참가 🚀</button>
+  </div>
+
+  <div class="card center">
+    <p class="muted" style="margin:0 0 10px">게임을 진행하시나요?</p>
+    <a href="/host.html"><button class="alt">🎙️ 호스트로 방 만들기</button></a>
+  </div>
+</div>
+<script>
+  const params = new URLSearchParams(location.search);
+  if (params.get('code')) document.getElementById('code').value = params.get('code').toUpperCase();
+  document.getElementById('joinBtn').onclick = () => {
+    const code = document.getElementById('code').value.trim().toUpperCase();
+    const name = document.getElementById('name').value.trim();
+    if (code.length !== 4) return alert('4자리 방 코드를 입력하세요.');
+    if (!name) return alert('닉네임을 입력하세요.');
+    sessionStorage.setItem('bingoName', name);
+    location.href = '/player.html?code=' + encodeURIComponent(code);
+  };
+</script>
+</body>
+</html>

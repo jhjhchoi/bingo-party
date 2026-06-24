@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>빙고 - 내 카드</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<div class="wrap">
+
+  <!-- JOIN -->
+  <div id="joinView" class="card">
+    <h2>빙고 참가</h2>
+    <label>방 코드</label>
+    <input id="code" maxlength="4" autocapitalize="characters" style="text-transform:uppercase;" />
+    <label>닉네임</label>
+    <input id="name" maxlength="20" placeholder="이름" />
+    <div style="height:12px"></div>
+    <button class="go" id="joinBtn">참가하기 🚀</button>
+  </div>
+
+  <!-- WORDS collection -->
+  <div id="wordsView" class="card hidden">
+    <h2>단어 입력 ✍️</h2>
+    <p class="muted" id="catLine"></p>
+    <div id="wordInputs"></div>
+    <div style="height:8px"></div>
+    <button id="submitWords">제출하기</button>
+    <p class="muted center" id="wordsStatus" style="margin-top:12px"></p>
+  </div>
+
+  <!-- LOBBY wait -->
+  <div id="lobbyView" class="card center hidden">
+    <h2 id="lobbyName">대기 중…</h2>
+    <p class="muted">호스트가 게임을 시작하면 카드가 나타납니다.</p>
+    <div class="pill" id="lobbyCount">참가자 0명</div>
+  </div>
+
+  <!-- GAME -->
+  <div id="gameView" class="hidden">
+    <div id="winBanner" class="banner hidden">🎉 빙고! 우승을 축하합니다!</div>
+    <div class="statline">
+      <span class="pill">방 <b id="roomCode"></b></span>
+      <span class="pill">완성 줄 <b id="myLines">0</b> / <b id="needLines">3</b></span>
+    </div>
+    <div class="card" style="padding:12px;">
+      <div class="muted center" style="font-size:13px">방금 호출</div>
+      <div class="bigcall" id="bigCall">–</div>
+    </div>
+    <div class="board" id="board"></div>
+    <div class="card" style="margin-top:14px;">
+      <div class="muted" style="font-size:13px;margin-bottom:6px">호출된 항목 (<span id="calledCount">0</span>)</div>
+      <div class="called-list" id="calledList"></div>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+<canvas id="confetti" style="position:fixed;inset:0;pointer-events:none;z-index:40;display:none"></canvas>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io();
+const $ = (id) => document.getElementById(id);
+let state = { code: null, pid: null, mode: 'numbers', card: null, calledSet: new Set(), needLines: 3 };
+
+// restore pid per room
+function pidKey(code){ return 'bingoPid:' + code; }
+
+const params = new URLSearchParams(location.search);
+if (params.get('code')) $('code').value = params.get('code').toUpperCase();
+if (sessionStorage.getItem('bingoName')) $('name').value = sessionStorage.getItem('bingoName');
+
+function show(view){
+  ['joinView','wordsView','lobbyView','gameView'].forEach(v => $(v).classList.add('hidden'));
+  $(view).classList.remove('hidden');
+}
+function toast(msg){
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 1800);
+}
+
+$('joinBtn').onclick = doJoin;
+function doJoin(){
+  const code = $('code').value.trim().toUpperCase();
+  const name = $('name').value.trim();
+  if (code.length !== 4) return alert('4자리 방 코드를 입력하세요.');
+  if (!name) return alert('닉네임을 입력하세요.');
+  state.code = code;
+  const savedPid = localStorage.getItem(pidKey(code)) || null;
+  socket.emit('player:join', { code, name, pid: savedPid }, (res) => {
+    if (!res || !res.ok) {
+      if (res && res.error === 'in-progress') return alert('이미 게임이 진행 중입니다.');
+      return alert('방을 찾을 수 없습니다. 코드를 확인하세요.');
+    }
+    state.pid = res.pid;
+    state.mode = res.mode;
+    state.needLines = res.settings.linesToWin;
+    localStorage.setItem(pidKey(code), res.pid);
+    sessionStorage.setItem('bingoName', name);
+    $('roomCode').textContent = code;
+    $('needLines').textContent = res.settings.linesToWin;
+    applyServerState(res);
+  });
+}
+
+function applyServerState(res){
+  if (res.card) { state.card = res.card; }
+  state.calledSet = new Set(res.called || []);
+
+  if (res.status === 'collecting' && res.mode === 'words') {
+    renderWordInputs(res.settings.wordsPerPlayer, res.settings.category, res.submittedWords);
+    show('wordsView');
+  } else if (res.status === 'lobby' || (res.status === 'collecting')) {
+    $('lobbyName').textContent = '곧 시작합니다!';
+    show('lobbyView');
+  } else if (res.status === 'playing' || res.status === 'ended') {
+    if (state.card) { renderBoard(); show('gameView'); refreshCalled(res.called||[]); updateLines(res.lines||0, res.won); }
+    else { show('lobbyView'); }
+    if (res.winners && res.winners.length) showWinners(res.winners);
+  }
+}
+
+// ---- words ----
+function renderWordInputs(n, category, existing){
+  $('catLine').textContent = category ? ('카테고리: ' + category) : '아래에 단어를 입력하세요.';
+  const box = $('wordInputs'); box.innerHTML = '';
+  for (let i=0;i<n;i++){
+    const inp = document.createElement('input');
+    inp.placeholder = `단어 ${i+1}`;
+    inp.maxLength = 30;
+    inp.style.marginBottom = '8px';
+    if (existing && existing[i]) inp.value = existing[i];
+    box.appendChild(inp);
+  }
+}
+$('submitWords').onclick = () => {
+  const words = [...$('wordInputs').querySelectorAll('input')].map(i=>i.value.trim()).filter(Boolean);
+  if (!words.length) return alert('단어를 하나 이상 입력하세요.');
+  socket.emit('player:words', words, (res) => {
+    if (res && res.ok) { toast('제출 완료! 다른 참가자를 기다려주세요.'); $('wordsStatus').textContent = '✅ 제출됨: ' + res.submittedWords.join(', '); }
+  });
+};
+
+// ---- board ----
+function renderBoard(){
+  const b = $('board'); b.innerHTML = '';
+  for (let r=0;r<5;r++) for (let c=0;c<5;c++){
+    const v = state.card[r][c];
+    const div = document.createElement('div');
+    div.className = 'cell' + (state.calledSet.has(v) ? ' called' : '');
+    div.textContent = v;
+    div.dataset.val = v;
+    div.onclick = () => div.classList.toggle('tapped'); // purely visual daub
+    b.appendChild(div);
+  }
+}
+function markCell(v){
+  document.querySelectorAll('.cell').forEach(el => {
+    if (String(el.dataset.val) === String(v)) el.classList.add('called');
+  });
+}
+function refreshCalled(called){
+  state.calledSet = new Set(called);
+  $('calledCount').textContent = called.length;
+  $('calledList').innerHTML = called.map(v=>`<span class="chip">${v}</span>`).join('');
+  if (state.card) called.forEach(markCell);
+  if (called.length) $('bigCall').textContent = called[called.length-1];
+}
+function updateLines(lines, won){
+  $('myLines').textContent = lines;
+  if (won) { $('winBanner').classList.remove('hidden'); fireConfetti(); }
+}
+
+// ---- socket events ----
+socket.on('player:card', (d) => { state.card = d.card; state.mode = d.mode; renderBoard(); show('gameView'); });
+socket.on('game:call', (d) => { $('bigCall').textContent = d.value; markCell(d.value); refreshCalled(d.called); });
+socket.on('player:state', (d) => { refreshCalled(d.called); updateLines(d.lines, d.won); });
+socket.on('game:winners', (w) => showWinners(w));
+socket.on('game:reset', () => { toast('새 게임을 준비합니다.'); show('lobbyView'); $('winBanner').classList.add('hidden'); });
+socket.on('game:end', (d) => { if (d.winners && d.winners.length) showWinners(d.winners); });
+
+function showWinners(winners){
+  const mine = winners.find(w => w.pid === state.pid);
+  if (mine) { $('winBanner').textContent = '🎉 빙고! 우승을 축하합니다!'; $('winBanner').classList.remove('hidden'); fireConfetti(); }
+  else { toast('🏆 우승자: ' + winners.map(w=>w.name).join(', ')); }
+}
+
+// reconnect: rejoin automatically
+socket.on('connect', () => {
+  if (state.code && state.pid) {
+    socket.emit('player:join', { code: state.code, name: sessionStorage.getItem('bingoName'), pid: state.pid }, (res)=>{
+      if (res && res.ok) applyServerState(res);
+    });
+  }
+});
+
+// ---- confetti ----
+function fireConfetti(){
+  const cv = $('confetti'); cv.style.display='block';
+  const ctx = cv.getContext('2d'); cv.width=innerWidth; cv.height=innerHeight;
+  const colors=['#ff5e7e','#5b8cff','#ffce54','#2ecc71','#fff'];
+  let parts = Array.from({length:140},()=>({x:Math.random()*cv.width,y:-20-Math.random()*cv.height,
+    r:4+Math.random()*6,c:colors[(Math.random()*colors.length)|0],vy:2+Math.random()*4,vx:-2+Math.random()*4,a:1}));
+  let t=0;
+  (function loop(){
+    ctx.clearRect(0,0,cv.width,cv.height);
+    parts.forEach(p=>{p.y+=p.vy;p.x+=p.vx;p.vy+=0.03;ctx.globalAlpha=p.a;ctx.fillStyle=p.c;
+      ctx.fillRect(p.x,p.y,p.r,p.r);});
+    t++; if (t<240) requestAnimationFrame(loop); else { cv.style.display='none'; }
+  })();
+}
+</script>
+</body>
+</html>
