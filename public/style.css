@@ -116,3 +116,23 @@ button.go { background: linear-gradient(135deg, var(--accent), #ff8a5e); font-si
   border-radius: 12px; font-weight: 700; opacity: 0; transition: opacity .2s; z-index: 50;
 }
 .toast.show { opacity: 1; }
+
+/* ---- Branding ---- */
+.brand { text-align: center; margin: 14px 0 18px; }
+.brand .dice { font-size: 26px; vertical-align: middle; filter: drop-shadow(0 2px 8px rgba(255,94,126,.4)); }
+.brand .mark {
+  font-size: clamp(28px, 8vw, 40px); font-weight: 900; letter-spacing: 1px; vertical-align: middle;
+  background: linear-gradient(100deg, var(--gold) 0%, var(--accent) 55%, var(--accent2) 100%);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+  text-shadow: 0 4px 28px rgba(255,94,126,.25);
+}
+.brand .tag {
+  font-size: 11px; color: var(--muted); letter-spacing: 4px; text-transform: uppercase; margin-top: 4px;
+}
+.app-footer {
+  text-align: center; margin-top: 34px; padding-top: 16px;
+  border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; letter-spacing: 1px;
+}
+.app-footer b { color: var(--text); letter-spacing: 3px; font-weight: 800; }
+.app-footer .heart { color: var(--accent); }
