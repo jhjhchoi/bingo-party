@@ -205,3 +205,10 @@ button.go { background: linear-gradient(135deg, var(--accent), #ff8a5e); font-si
 .emoji-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .emoji-bar button { background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 0; font-size: 22px; width: 100%; }
 .emoji-bar button:active { transform: scale(1.18); background: var(--card); }
+
+/* small inline toggle (player voice) */
+.mini-toggle {
+  width: auto; padding: 6px 12px; font-size: 13px; font-weight: 700;
+  background: var(--bg2); border: 1px solid var(--line); color: var(--text); border-radius: 999px;
+}
+.mini-toggle.off { color: var(--muted); }

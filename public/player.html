@@ -54,7 +54,7 @@
     </div>
     <div class="card" style="padding:12px;">
       <div class="statline" style="margin:0 0 4px">
-        <span class="muted" style="font-size:13px">방금 호출</span>
+        <button id="pVoiceBtn" class="mini-toggle">🔊 음성</button>
         <span class="pill" id="countdownPill">다음 호출 <b id="countdown">–</b>초</span>
       </div>
       <div class="bigcall" id="bigCall">–</div>
@@ -128,6 +128,7 @@ function doJoin(){
   if (!name) return alert('닉네임을 입력하세요.');
   state.code = code;
   if (window.Sound) Sound.unlock();
+  if (window.Voice) Voice.prime(); // unlock speech within the tap gesture (esp. iOS)
   const savedPid = localStorage.getItem(pidKey(code)) || null;
   socket.emit('player:join', { code, name, pid: savedPid }, (res) => {
     if (!res || !res.ok) {
@@ -196,6 +197,18 @@ function letterFor(v){
   if (v <= 15) return 'B'; if (v <= 30) return 'I'; if (v <= 45) return 'N'; if (v <= 60) return 'G'; return 'O';
 }
 function label(v){ const L = letterFor(v); return L ? (L + '-' + v) : v; }
+
+// ---- voice (shared Voice module in sounds.js) ----
+function sayCall(v){
+  const L = letterFor(v);
+  if (window.Voice) Voice.speak(L ? (L + ' ' + v + '... ' + L + ' ' + v) : String(v));
+}
+function setPVoice(on){
+  if (window.Voice) Voice.enabled(on);
+  $('pVoiceBtn').textContent = on ? '🔊 음성' : '🔇 음성';
+  $('pVoiceBtn').classList.toggle('off', !on);
+}
+$('pVoiceBtn').onclick = () => setPVoice(window.Voice ? !Voice.enabled() : false);
 
 // ---- board ----
 let daubed = new Set(); // values the player has tapped to mark (strings)
@@ -294,7 +307,7 @@ socket.on('room:update', (r) => {
   if (r.status === 'ended') stopCountdown();
 });
 socket.on('player:card', (d) => { state.card = d.card; state.mode = d.mode; state.won = false; daubed = new Set(); $('reachBanner').classList.add('hidden'); renderBoard(); show('gameView'); startCountdown(); });
-socket.on('game:call', (d) => { refreshCalled(d.called); startCountdown(); });
+socket.on('game:call', (d) => { refreshCalled(d.called); startCountdown(); sayCall(d.value); });
 socket.on('player:state', (d) => { refreshCalled(d.called); updateLines(d.lines, d.won); updateReach(d.reach, d.waiting); });
 socket.on('player:reach', (d) => {
   if (window.Sound) Sound.reach();

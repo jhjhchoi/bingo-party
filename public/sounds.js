@@ -46,3 +46,23 @@ window.Sound = (function () {
     pop() { unlock(); tone(800, 0, 0.05, 'sine', 0.08); }
   };
 })();
+
+// Shared voice caller (speech synthesis) — used by both host and player pages.
+window.Voice = (function () {
+  let on = true, voices = [];
+  function load() { try { voices = speechSynthesis.getVoices(); } catch (e) {} }
+  if ('speechSynthesis' in window) { load(); speechSynthesis.onvoiceschanged = load; }
+  return {
+    enabled(v) { if (v !== undefined) on = !!v; return on; },
+    prime() { if ('speechSynthesis' in window) { try { speechSynthesis.resume(); } catch (e) {} } },
+    speak(text) {
+      if (!on || !('speechSynthesis' in window)) return;
+      const u = new SpeechSynthesisUtterance(text);
+      const en = voices.find(v => /en[-_]US/i.test(v.lang)) || voices.find(v => /^en/i.test(v.lang));
+      if (en) u.voice = en;
+      u.lang = en ? en.lang : 'en-US';
+      u.rate = 0.92; u.pitch = 1.05;
+      try { speechSynthesis.cancel(); speechSynthesis.speak(u); } catch (e) {}
+    }
+  };
+})();
