@@ -273,11 +273,13 @@ io.on('connection', (socket) => {
     if (Object.keys(room.players).length === 0) {
       return cb && cb({ ok: false, error: 'no-players' });
     }
-    // (re)generate cards for everyone now that pool is final
+    // Lock in cards. Numbers-mode players already chose one in the lobby (keep it);
+    // words-mode players get theirs now that the pool is final.
     for (const p of Object.values(room.players)) {
-      p.card = makeCardForRoom(room);
+      if (!p.card) p.card = makeCardForRoom(room);
       p.lines = 0;
       p.won = false;
+      p.reach = false;
       if (p.socketId) io.to(p.socketId).emit('player:card', { card: p.card, mode: room.mode });
     }
     room.status = 'playing';
@@ -298,8 +300,17 @@ io.on('connection', (socket) => {
     room.called = [];
     room.calledSet = new Set();
     room.winners = [];
-    for (const p of Object.values(room.players)) { p.won = false; p.lines = 0; }
     io.to('room:' + code).emit('game:reset');
+    for (const p of Object.values(room.players)) {
+      p.won = false; p.lines = 0; p.reach = false;
+      // numbers mode: hand out a fresh preview card to re-roll for the next round
+      if (room.mode === 'numbers') {
+        p.card = makeNumberCard();
+        if (p.socketId) io.to(p.socketId).emit('player:preview', { card: p.card });
+      } else {
+        p.card = null;
+      }
+    }
     broadcastRoom(room);
     if (cb) cb({ ok: true });
   });
@@ -322,7 +333,8 @@ io.on('connection', (socket) => {
         pid,
         name: (data.name || 'Player').toString().slice(0, 20),
         socketId: socket.id,
-        card: room.status === 'playing' ? makeCardForRoom(room) : null,
+        // numbers mode: deal a preview card immediately so they can re-roll in the lobby
+        card: (room.mode === 'numbers' || room.status === 'playing') ? makeCardForRoom(room) : null,
         won: false,
         lines: 0,
         submittedWords: [],
@@ -366,6 +378,16 @@ io.on('connection', (socket) => {
     room.players[pid].submittedWords = clean;
     broadcastRoom(room);
     if (cb) cb({ ok: true, submittedWords: clean });
+  });
+
+  socket.on('player:reroll', (cb) => {
+    const room = rooms[socket.data.roomCode];
+    const pid = socket.data.pid;
+    if (!room || !room.players[pid]) return cb && cb({ ok: false });
+    if (room.mode !== 'numbers' || room.status !== 'lobby') return cb && cb({ ok: false, error: 'locked' });
+    const card = makeNumberCard();
+    room.players[pid].card = card;
+    if (cb) cb({ ok: true, card });
   });
 
   socket.on('player:react', (emoji) => {
