@@ -180,6 +180,26 @@ button.go { background: linear-gradient(135deg, var(--accent), #ff8a5e); font-si
   margin-top: 26px; width: auto; padding: 13px 32px; border-radius: 999px;
   background: var(--card); border: 1px solid var(--line); color: var(--text); font-weight: 700;
 }
+
+/* ---- compact player game layout (fit the essentials on one screen) ---- */
+#gameView .card { padding: 12px; margin-bottom: 10px; }
+#gameView .statline { margin: 0 0 8px; }
+#gameView .banner, #gameView .reach-banner, #gameView .turn-box { margin-bottom: 8px; padding: 10px 12px; }
+#gameView .ball-stage { height: 100px; }
+#gameView .ball {
+  width: 86px; height: 86px;
+  box-shadow: inset -7px -8px 16px rgba(0,0,0,.28), inset 6px 6px 12px rgba(255,255,255,.4), 0 8px 18px rgba(0,0,0,.35);
+}
+#gameView .ball span { font-size: clamp(26px, 8vw, 36px); }
+#gameView .ball::before { top: 10px; left: 16px; width: 24px; height: 16px; }
+#gameView .bingo-header { margin-bottom: 6px; }
+#gameView .board { gap: 6px; }
+/* cap the growing lists so the page stops getting taller as the game runs */
+#gameView #miniBoard { max-height: 124px; overflow-y: auto; }
+#gameView #calledList { max-height: 72px; overflow-y: auto; }
+/* during play, drop the big brand header + tighten top padding to keep the board in view */
+body.playing .brand { display: none; }
+body.playing .wrap { padding-top: 10px; }
 .cell.hot {
   cursor: pointer; border-color: var(--gold); color: var(--gold);
   box-shadow: 0 0 0 2px var(--gold), 0 0 16px rgba(255,206,84,.55);

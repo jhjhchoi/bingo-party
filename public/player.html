@@ -131,6 +131,7 @@ if (sessionStorage.getItem('bingoName')) $('name').value = sessionStorage.getIte
 function show(view){
   ['joinView','wordsView','lobbyView','gameView'].forEach(v => $(v).classList.add('hidden'));
   $(view).classList.remove('hidden');
+  document.body.classList.toggle('playing', view === 'gameView');
 }
 function toast(msg){
   const t = $('toast'); t.textContent = msg; t.classList.add('show');
