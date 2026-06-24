@@ -115,7 +115,9 @@ function roomSummary(room) {
 }
 
 function broadcastRoom(room) {
-  io.to('host:' + room.code).emit('room:update', roomSummary(room));
+  const summary = roomSummary(room);
+  io.to('host:' + room.code).emit('room:update', summary);
+  io.to('room:' + room.code).emit('room:update', summary);
 }
 
 function startCalling(room) {

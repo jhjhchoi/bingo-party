@@ -33,6 +33,7 @@
   <!-- LOBBY wait -->
   <div id="lobbyView" class="card center hidden">
     <h2 id="lobbyName">대기 중…</h2>
+    <p class="muted">👤 <b id="lobbyMyName"></b> 님, 환영합니다!</p>
     <p class="muted">호스트가 게임을 시작하면 카드가 나타납니다.</p>
     <div class="pill" id="lobbyCount">참가자 0명</div>
   </div>
@@ -41,16 +42,27 @@
   <div id="gameView" class="hidden">
     <div id="winBanner" class="banner hidden">🎉 빙고! 우승을 축하합니다!</div>
     <div class="statline">
-      <span class="pill">방 <b id="roomCode"></b></span>
+      <span class="pill">👤 <b id="myName"></b></span>
+      <span class="pill">👥 <b id="playerCount">0</b>명</span>
       <span class="pill">완성 줄 <b id="myLines">0</b> / <b id="needLines">3</b></span>
     </div>
     <div class="card" style="padding:12px;">
-      <div class="muted center" style="font-size:13px">방금 호출</div>
+      <div class="statline" style="margin:0 0 4px">
+        <span class="muted" style="font-size:13px">방금 호출</span>
+        <span class="pill" id="countdownPill">다음 호출 <b id="countdown">–</b>초</span>
+      </div>
       <div class="bigcall" id="bigCall">–</div>
     </div>
     <div class="board" id="board"></div>
     <div class="card" style="margin-top:14px;">
-      <div class="muted" style="font-size:13px;margin-bottom:6px">호출된 항목 (<span id="calledCount">0</span>)</div>
+      <div class="statline" style="margin:0 0 6px">
+        <span class="muted" style="font-size:13px">🏆 실시간 현황</span>
+        <span class="muted" style="font-size:13px">호출 <span id="calledCount">0</span></span>
+      </div>
+      <div id="miniBoard"></div>
+    </div>
+    <div class="card">
+      <div class="muted" style="font-size:13px;margin-bottom:6px">호출된 항목</div>
       <div class="called-list" id="calledList"></div>
     </div>
   </div>
@@ -64,7 +76,7 @@
 <script>
 const socket = io();
 const $ = (id) => document.getElementById(id);
-let state = { code: null, pid: null, mode: 'numbers', card: null, calledSet: new Set(), needLines: 3 };
+let state = { code: null, pid: null, name: '', mode: 'numbers', card: null, calledSet: new Set(), needLines: 3, intervalSec: 4 };
 
 // restore pid per room
 function pidKey(code){ return 'bingoPid:' + code; }
@@ -72,6 +84,15 @@ function pidKey(code){ return 'bingoPid:' + code; }
 const params = new URLSearchParams(location.search);
 if (params.get('code')) $('code').value = params.get('code').toUpperCase();
 if (sessionStorage.getItem('bingoName')) $('name').value = sessionStorage.getItem('bingoName');
+
+// auto-rejoin on page reload if we already have a saved session for this room
+(function autoRejoin(){
+  const code = ($('code').value || '').trim().toUpperCase();
+  const name = ($('name').value || '').trim();
+  if (code.length === 4 && name && localStorage.getItem(pidKey(code))) {
+    setTimeout(doJoin, 100);
+  }
+})();
 
 function show(view){
   ['joinView','wordsView','lobbyView','gameView'].forEach(v => $(v).classList.add('hidden'));
@@ -96,18 +117,24 @@ function doJoin(){
       return alert('방을 찾을 수 없습니다. 코드를 확인하세요.');
     }
     state.pid = res.pid;
+    state.name = name;
     state.mode = res.mode;
     state.needLines = res.settings.linesToWin;
+    state.intervalSec = res.settings.intervalSec || 4;
     localStorage.setItem(pidKey(code), res.pid);
     sessionStorage.setItem('bingoName', name);
-    $('roomCode').textContent = code;
     $('needLines').textContent = res.settings.linesToWin;
+    $('myName').textContent = name;
+    $('lobbyMyName').textContent = name;
     applyServerState(res);
   });
 }
 
 function applyServerState(res){
   if (res.card) { state.card = res.card; }
+  if (res.settings) { state.intervalSec = res.settings.intervalSec || state.intervalSec; state.needLines = res.settings.linesToWin || state.needLines; }
+  if (state.name) { $('myName').textContent = state.name; $('lobbyMyName').textContent = state.name; }
+  $('needLines').textContent = state.needLines;
   state.calledSet = new Set(res.called || []);
 
   if (res.status === 'collecting' && res.mode === 'words') {
@@ -174,13 +201,49 @@ function updateLines(lines, won){
   if (won) { $('winBanner').classList.remove('hidden'); fireConfetti(); }
 }
 
+// ---- countdown ----
+let countdown = 0, countdownTimer = null;
+function startCountdown(){
+  countdown = state.intervalSec;
+  $('countdown').textContent = countdown;
+  $('countdownPill').classList.remove('hidden');
+  if (countdownTimer) clearInterval(countdownTimer);
+  countdownTimer = setInterval(() => {
+    countdown = Math.max(0, countdown - 1);
+    $('countdown').textContent = countdown;
+  }, 1000);
+}
+function stopCountdown(){ if (countdownTimer) clearInterval(countdownTimer); $('countdownPill').classList.add('hidden'); }
+
+// ---- live leaderboard (players + their line counts) ----
+function renderMiniBoard(players){
+  if (!players) return;
+  $('playerCount').textContent = players.length;
+  $('lobbyCount').textContent = '참가자 ' + players.length + '명';
+  const sorted = [...players].sort((a,b)=> (b.lines-a.lines) || a.name.localeCompare(b.name));
+  $('miniBoard').innerHTML = sorted.map((p,i)=>{
+    const me = p.pid === state.pid;
+    const rank = p.won ? '🏆' : (i+1);
+    return `<div class="lb-row" style="${me?'background:rgba(91,140,255,.15);border-radius:8px;':''}">
+      <span style="width:22px;text-align:center">${rank}</span>
+      <span class="dot ${p.online?'':'off'}"></span>
+      <span class="lb-name">${escapeHtml(p.name)}${me?' <span class="muted">(나)</span>':''}</span>
+      <span class="lb-lines">${p.lines}줄</span></div>`;
+  }).join('') || '<p class="muted">참가자 없음</p>';
+}
+function escapeHtml(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
 // ---- socket events ----
-socket.on('player:card', (d) => { state.card = d.card; state.mode = d.mode; renderBoard(); show('gameView'); });
-socket.on('game:call', (d) => { $('bigCall').textContent = d.value; markCell(d.value); refreshCalled(d.called); });
+socket.on('room:update', (r) => {
+  renderMiniBoard(r.players);
+  if (r.status === 'ended') stopCountdown();
+});
+socket.on('player:card', (d) => { state.card = d.card; state.mode = d.mode; renderBoard(); show('gameView'); startCountdown(); });
+socket.on('game:call', (d) => { $('bigCall').textContent = d.value; markCell(d.value); refreshCalled(d.called); startCountdown(); });
 socket.on('player:state', (d) => { refreshCalled(d.called); updateLines(d.lines, d.won); });
 socket.on('game:winners', (w) => showWinners(w));
-socket.on('game:reset', () => { toast('새 게임을 준비합니다.'); show('lobbyView'); $('winBanner').classList.add('hidden'); });
-socket.on('game:end', (d) => { if (d.winners && d.winners.length) showWinners(d.winners); });
+socket.on('game:reset', () => { toast('새 게임을 준비합니다.'); stopCountdown(); show('lobbyView'); $('winBanner').classList.add('hidden'); });
+socket.on('game:end', (d) => { stopCountdown(); if (d.winners && d.winners.length) showWinners(d.winners); });
 
 function showWinners(winners){
   const mine = winners.find(w => w.pid === state.pid);
