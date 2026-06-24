@@ -59,6 +59,7 @@
   <div id="gameView" class="hidden">
     <div id="winBanner" class="banner hidden">🎉 빙고! 우승을 축하합니다!</div>
     <div id="reachBanner" class="reach-banner hidden">⚡ 리치! 한 칸 남았어요</div>
+    <div id="turnBanner" class="turn-box hidden"></div>
     <div class="statline">
       <span class="pill">👤 <b id="myName"></b></span>
       <span class="pill">👥 <b id="playerCount">0</b>명</span>
@@ -67,7 +68,7 @@
     <div class="card" style="padding:12px;">
       <div class="statline" style="margin:0 0 4px">
         <button id="pVoiceBtn" class="mini-toggle">🔊 음성</button>
-        <span class="pill" id="countdownPill">다음 호출 <b id="countdown">–</b>초</span>
+        <span class="pill" id="countdownPill"><span id="cdLabel">다음 호출</span> <b id="countdown">–</b>초</span>
       </div>
       <div class="bigcall" id="bigCall">–</div>
     </div>
@@ -105,7 +106,7 @@
 <script>
 const socket = io();
 const $ = (id) => document.getElementById(id);
-let state = { code: null, pid: null, name: '', mode: 'numbers', card: null, calledSet: new Set(), needLines: 3, intervalSec: 4, won: false };
+let state = { code: null, pid: null, name: '', mode: 'numbers', card: null, calledSet: new Set(), needLines: 3, intervalSec: 4, won: false, myTurn: false };
 
 // restore pid per room
 function pidKey(code){ return 'bingoPid:' + code; }
@@ -230,9 +231,10 @@ let daubed = new Set(); // values the player has tapped to mark (strings)
 function cellState(div){
   const v = div.dataset.val;
   if (v === '★') return; // free center stays marked
-  div.classList.remove('hot','daubed');
+  div.classList.remove('hot','daubed','callable');
   if (daubed.has(v)) div.classList.add('daubed');
   else if (state.calledSet.has(v)) div.classList.add('hot'); // called but not yet daubed → "tap me!"
+  else if (state.mode === 'turns' && state.myTurn) div.classList.add('callable'); // my turn → tap to call
 }
 function renderBoard(){
   $('bingoHeader').classList.toggle('hidden', state.mode !== 'numbers');
@@ -253,6 +255,13 @@ function renderBoard(){
 }
 function tryDaub(div){
   const v = div.dataset.val;
+  // turn-based mode: on my turn, tapping an uncalled cell CALLS that number for everyone
+  if (state.mode === 'turns' && state.myTurn && v !== '★' && !state.calledSet.has(v)) {
+    socket.emit('player:call', Number(v));
+    state.myTurn = false; // optimistic lock to prevent double-tap
+    document.querySelectorAll('#board .cell').forEach(cellState);
+    return;
+  }
   if (state.calledSet.has(v) && !daubed.has(v)) { daubed.add(v); cellState(div); if (window.Sound) Sound.daub(); }
   else if (!state.calledSet.has(v)) { div.animate([{transform:'translateX(-3px)'},{transform:'translateX(3px)'},{transform:'translateX(0)'}],{duration:160}); }
 }
@@ -308,8 +317,9 @@ $('rerollBtn').onclick = () => {
 
 // ---- countdown ----
 let countdown = 0, countdownTimer = null;
-function startCountdown(){
-  countdown = state.intervalSec;
+function startCountdown(sec, labelText){
+  countdown = sec || state.intervalSec;
+  $('cdLabel').textContent = labelText || '다음 호출';
   $('countdown').textContent = countdown;
   $('countdownPill').classList.remove('hidden');
   if (countdownTimer) clearInterval(countdownTimer);
@@ -342,9 +352,33 @@ function escapeHtml(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&
 socket.on('room:update', (r) => {
   renderMiniBoard(r.players);
   if (r.status === 'ended') stopCountdown();
+  // turn-based: sync my-turn state if we missed a game:turn (e.g. reconnect)
+  if (r.mode === 'turns' && r.status === 'playing') {
+    const nowMine = (r.currentPid === state.pid);
+    if (nowMine !== state.myTurn) {
+      state.myTurn = nowMine;
+      const cur = r.players.find(p => p.pid === r.currentPid);
+      updateTurnBanner(cur ? cur.name : '');
+      document.querySelectorAll('#board .cell').forEach(cellState);
+    }
+  }
 });
-socket.on('player:card', (d) => { state.card = d.card; state.mode = d.mode; state.won = false; daubed = new Set(); $('reachBanner').classList.add('hidden'); renderBoard(); show('gameView'); startCountdown(); });
-socket.on('game:call', (d) => { refreshCalled(d.called); startCountdown(); sayCall(d.value); });
+socket.on('player:card', (d) => { state.card = d.card; state.mode = d.mode; state.won = false; state.myTurn = false; daubed = new Set(); $('reachBanner').classList.add('hidden'); renderBoard(); show('gameView'); if (state.mode !== 'turns') startCountdown(state.intervalSec, '다음 호출'); });
+socket.on('game:call', (d) => { refreshCalled(d.called); if (state.mode !== 'turns') startCountdown(state.intervalSec, '다음 호출'); sayCall(d.value); });
+socket.on('game:turn', (d) => {
+  state.myTurn = (d.pid === state.pid);
+  updateTurnBanner(d.name);
+  document.querySelectorAll('#board .cell').forEach(cellState);
+  startCountdown(d.turnSec, state.myTurn ? '내 차례' : '남은 시간');
+  if (state.myTurn && window.Sound) Sound.reach();
+});
+function updateTurnBanner(name){
+  const el = $('turnBanner');
+  if (state.mode !== 'turns') { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  if (state.myTurn) { el.innerHTML = '🎯 <b>내 차례!</b> 내 판에서 숫자를 눌러 호출하세요'; el.classList.add('my'); }
+  else { el.innerHTML = '⏳ <b>' + escapeHtml(name) + '</b> 님 차례'; el.classList.remove('my'); }
+}
 socket.on('player:state', (d) => { refreshCalled(d.called); updateLines(d.lines, d.won); updateReach(d.reach, d.waiting); });
 socket.on('player:reach', (d) => {
   if (window.Sound) Sound.reach();
@@ -355,8 +389,8 @@ socket.on('player:reach', (d) => {
 socket.on('game:winners', (w) => showWinners(w));
 socket.on('reaction', (d) => floatEmoji(d.emoji));
 socket.on('player:preview', (d) => { state.card = d.card; state.won = false; daubed = new Set(); renderPreview(); $('lobbyCard').classList.remove('hidden'); });
-socket.on('game:reset', () => { toast('새 게임을 준비합니다.'); daubed = new Set(); state.won = false; stopCountdown(); show('lobbyView'); $('winBanner').classList.add('hidden'); $('reachBanner').classList.add('hidden'); $('lobbyCard').classList.add('hidden'); });
-socket.on('game:end', (d) => { stopCountdown(); if (d.winners && d.winners.length) showWinners(d.winners); });
+socket.on('game:reset', () => { toast('새 게임을 준비합니다.'); daubed = new Set(); state.won = false; state.myTurn = false; stopCountdown(); show('lobbyView'); $('winBanner').classList.add('hidden'); $('reachBanner').classList.add('hidden'); $('turnBanner').classList.add('hidden'); $('lobbyCard').classList.add('hidden'); });
+socket.on('game:end', (d) => { stopCountdown(); state.myTurn = false; $('turnBanner').classList.add('hidden'); if (state.card) document.querySelectorAll('#board .cell').forEach(cellState); if (d.winners && d.winners.length) showWinners(d.winners); });
 
 function showWinners(winners){
   const mine = winners.find(w => w.pid === state.pid);

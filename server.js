@@ -77,8 +77,11 @@ function makeWordCard(pool) {
   return card;
 }
 
+// number-based modes: 'numbers' (auto-call) and 'turns' (players take turns calling)
+function isNumberMode(mode) { return mode === 'numbers' || mode === 'turns'; }
+
 function makeCardForRoom(room) {
-  return room.mode === 'numbers' ? makeNumberCard() : makeWordCard(room.pool);
+  return isNumberMode(room.mode) ? makeNumberCard() : makeWordCard(room.pool);
 }
 
 function countLines(card, calledSet) {
@@ -149,6 +152,7 @@ function roomSummary(room) {
     called: room.called,
     poolSize: room.pool.length,
     uniqueWords: room.mode === 'words' ? uniqueWordCount(room) : null,
+    currentPid: room.currentPid || null,
     players: publicPlayers(room),
     winners: room.winners,
   };
@@ -160,52 +164,114 @@ function broadcastRoom(room) {
   io.to('room:' + room.code).emit('room:update', summary);
 }
 
+// Recompute everyone's lines/reach after a call; emit states; return new winners.
+function scoreAndBroadcast(room) {
+  const newWinners = [];
+  for (const p of Object.values(room.players)) {
+    p.lines = countLines(p.card, room.calledSet);
+    if (!p.won && p.lines >= room.settings.linesToWin) {
+      p.won = true;
+      p.wonAtCall = room.called.length;
+      newWinners.push({ pid: p.pid, name: p.name, lines: p.lines, atCall: p.wonAtCall });
+    }
+    const ri = reachInfo(p.card, room.calledSet, room.settings.linesToWin);
+    const wasReach = p.reach;
+    p.reach = ri.reach && !p.won;
+    if (p.socketId) {
+      io.to(p.socketId).emit('player:state', { lines: p.lines, won: p.won, called: room.called, reach: p.reach, waiting: ri.waiting });
+      if (p.reach && !wasReach) io.to(p.socketId).emit('player:reach', { waiting: ri.waiting });
+    }
+  }
+  if (newWinners.length) {
+    room.winners.push(...newWinners);
+    io.to('room:' + room.code).emit('game:winners', room.winners);
+    io.to('host:' + room.code).emit('game:winners', room.winners);
+  }
+  broadcastRoom(room);
+  return newWinners;
+}
+
+function emitCall(room, value, extra) {
+  room.called.push(value);
+  room.calledSet.add(value);
+  const payload = Object.assign({ value, called: room.called }, extra || {});
+  io.to('room:' + room.code).emit('game:call', payload);
+  io.to('host:' + room.code).emit('game:call', payload);
+}
+
+// ---- auto-call mode ----
 function startCalling(room) {
   if (room.timer) clearInterval(room.timer);
   room.callOrder = shuffle(room.pool);
   const tick = () => {
     if (room.status !== 'playing') return;
-    if (room.callOrder.length === 0) {
-      endGame(room, 'pool-exhausted');
-      return;
-    }
-    const value = room.callOrder.shift();
-    room.called.push(value);
-    room.calledSet.add(value);
-    io.to('room:' + room.code).emit('game:call', { value, called: room.called });
-    io.to('host:' + room.code).emit('game:call', { value, called: room.called });
-
-    // recompute lines & winners
-    const newWinners = [];
-    for (const p of Object.values(room.players)) {
-      p.lines = countLines(p.card, room.calledSet);
-      if (!p.won && p.lines >= room.settings.linesToWin) {
-        p.won = true;
-        p.wonAtCall = room.called.length;
-        newWinners.push({ pid: p.pid, name: p.name, lines: p.lines, atCall: p.wonAtCall });
-      }
-      const ri = reachInfo(p.card, room.calledSet, room.settings.linesToWin);
-      const wasReach = p.reach;
-      p.reach = ri.reach && !p.won;
-      if (p.socketId) {
-        io.to(p.socketId).emit('player:state', { lines: p.lines, won: p.won, called: room.called, reach: p.reach, waiting: ri.waiting });
-        if (p.reach && !wasReach) io.to(p.socketId).emit('player:reach', { waiting: ri.waiting });
-      }
-    }
-    if (newWinners.length) {
-      room.winners.push(...newWinners);
-      io.to('room:' + room.code).emit('game:winners', room.winners);
-      io.to('host:' + room.code).emit('game:winners', room.winners);
-      endGame(room, 'winner');
-    }
-    broadcastRoom(room);
+    if (room.callOrder.length === 0) { endGame(room, 'pool-exhausted'); return; }
+    emitCall(room, room.callOrder.shift());
+    if (scoreAndBroadcast(room).length) endGame(room, 'winner');
   };
   room.timer = setInterval(tick, Math.max(1, room.settings.intervalSec) * 1000);
   tick(); // call first immediately
 }
 
+// ---- turn-based mode ----
+function cardHasUncalled(room, p) {
+  for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) {
+    const v = p.card[r][c];
+    if (v !== FREE && !room.calledSet.has(v)) return true;
+  }
+  return false;
+}
+function setTurn(room, p) {
+  room.currentPid = p.pid;
+  if (room.turnTimer) clearTimeout(room.turnTimer);
+  const payload = { pid: p.pid, name: p.name, turnSec: room.settings.turnSec };
+  io.to('room:' + room.code).emit('game:turn', payload);
+  io.to('host:' + room.code).emit('game:turn', payload);
+  broadcastRoom(room);
+  room.turnTimer = setTimeout(() => autoPick(room, p.pid), room.settings.turnSec * 1000);
+}
+function advanceTurn(room) {
+  const order = Object.values(room.players);
+  if (!order.length) { endGame(room, 'no-players'); return; }
+  let start = 0;
+  if (room.currentPid) {
+    const i = order.findIndex((p) => p.pid === room.currentPid);
+    start = i + 1;
+  }
+  for (let k = 0; k < order.length; k++) {
+    const p = order[(start + k) % order.length];
+    if (p.socketId && !p.won && cardHasUncalled(room, p)) { setTurn(room, p); return; }
+  }
+  endGame(room, 'no-active-players'); // nobody connected can call
+}
+function autoPick(room, pid) {
+  if (room.status !== 'playing' || room.currentPid !== pid) return;
+  const p = room.players[pid];
+  if (!p) { advanceTurn(room); return; }
+  const opts = [];
+  for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) {
+    const v = p.card[r][c];
+    if (v !== FREE && !room.calledSet.has(v)) opts.push(v);
+  }
+  if (opts.length) doCall(room, pid, opts[Math.floor(Math.random() * opts.length)], true);
+  else advanceTurn(room);
+}
+function doCall(room, pid, value, isAuto) {
+  if (room.status !== 'playing' || room.currentPid !== pid) return;
+  const p = room.players[pid];
+  if (!p || room.calledSet.has(value)) return;
+  let onCard = false;
+  for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) if (p.card[r][c] === value) onCard = true;
+  if (!onCard) return;
+  if (room.turnTimer) { clearTimeout(room.turnTimer); room.turnTimer = null; }
+  emitCall(room, value, { by: p.name, auto: !!isAuto });
+  if (scoreAndBroadcast(room).length) endGame(room, 'winner');
+  else advanceTurn(room);
+}
+
 function endGame(room, reason) {
   if (room.timer) { clearInterval(room.timer); room.timer = null; }
+  if (room.turnTimer) { clearTimeout(room.turnTimer); room.turnTimer = null; }
   room.status = 'ended';
   io.to('room:' + room.code).emit('game:end', { reason, winners: room.winners });
   io.to('host:' + room.code).emit('game:end', { reason, winners: room.winners });
@@ -219,7 +285,8 @@ io.on('connection', (socket) => {
   // ---- HOST ----
   socket.on('host:create', (cfg, cb) => {
     const code = genCode();
-    const mode = cfg && cfg.mode === 'words' ? 'words' : 'numbers';
+    const m = cfg && cfg.mode;
+    const mode = m === 'words' ? 'words' : (m === 'turns' ? 'turns' : 'numbers');
     const room = {
       code,
       hostSocket: socket.id,
@@ -227,16 +294,19 @@ io.on('connection', (socket) => {
       status: mode === 'words' ? 'collecting' : 'lobby',
       settings: {
         intervalSec: Math.min(60, Math.max(1, parseInt(cfg.intervalSec, 10) || 4)),
+        turnSec: Math.min(60, Math.max(5, parseInt(cfg.turnSec, 10) || 15)),
         linesToWin: Math.min(12, Math.max(1, parseInt(cfg.linesToWin, 10) || 3)),
         wordsPerPlayer: Math.min(10, Math.max(1, parseInt(cfg.wordsPerPlayer, 10) || 3)),
         category: (cfg.category || '').toString().slice(0, 60),
       },
       players: {},
-      pool: mode === 'numbers' ? Array.from({ length: 75 }, (_, i) => i + 1) : [],
+      pool: isNumberMode(mode) ? Array.from({ length: 75 }, (_, i) => i + 1) : [],
       callOrder: [],
       called: [],
       calledSet: new Set(),
       timer: null,
+      turnTimer: null,
+      currentPid: null,
       winners: [],
     };
     rooms[code] = room;
@@ -286,8 +356,21 @@ io.on('connection', (socket) => {
     room.called = [];
     room.calledSet = new Set();
     room.winners = [];
-    startCalling(room);
-    broadcastRoom(room);
+    if (room.mode === 'turns') {
+      room.currentPid = null;
+      broadcastRoom(room);
+      advanceTurn(room);
+    } else {
+      startCalling(room);
+      broadcastRoom(room);
+    }
+    if (cb) cb({ ok: true });
+  });
+
+  socket.on('host:skipTurn', (cb) => {
+    const room = rooms[socket.data.hostCode];
+    if (!room || room.mode !== 'turns' || room.status !== 'playing') return cb && cb({ ok: false });
+    advanceTurn(room);
     if (cb) cb({ ok: true });
   });
 
@@ -296,15 +379,17 @@ io.on('connection', (socket) => {
     const room = rooms[code];
     if (!room) return cb && cb({ ok: false });
     if (room.timer) { clearInterval(room.timer); room.timer = null; }
+    if (room.turnTimer) { clearTimeout(room.turnTimer); room.turnTimer = null; }
     room.status = room.mode === 'words' ? 'collecting' : 'lobby';
     room.called = [];
     room.calledSet = new Set();
     room.winners = [];
+    room.currentPid = null;
     io.to('room:' + code).emit('game:reset');
     for (const p of Object.values(room.players)) {
       p.won = false; p.lines = 0; p.reach = false;
-      // numbers mode: hand out a fresh preview card to re-roll for the next round
-      if (room.mode === 'numbers') {
+      // number-based modes: hand out a fresh preview card to re-roll for the next round
+      if (isNumberMode(room.mode)) {
         p.card = makeNumberCard();
         if (p.socketId) io.to(p.socketId).emit('player:preview', { card: p.card });
       } else {
@@ -333,8 +418,8 @@ io.on('connection', (socket) => {
         pid,
         name: (data.name || 'Player').toString().slice(0, 20),
         socketId: socket.id,
-        // numbers mode: deal a preview card immediately so they can re-roll in the lobby
-        card: (room.mode === 'numbers' || room.status === 'playing') ? makeCardForRoom(room) : null,
+        // number-based modes: deal a preview card immediately so they can re-roll in the lobby
+        card: (isNumberMode(room.mode) || room.status === 'playing') ? makeCardForRoom(room) : null,
         won: false,
         lines: 0,
         submittedWords: [],
@@ -384,10 +469,17 @@ io.on('connection', (socket) => {
     const room = rooms[socket.data.roomCode];
     const pid = socket.data.pid;
     if (!room || !room.players[pid]) return cb && cb({ ok: false });
-    if (room.mode !== 'numbers' || room.status !== 'lobby') return cb && cb({ ok: false, error: 'locked' });
+    if (!isNumberMode(room.mode) || room.status !== 'lobby') return cb && cb({ ok: false, error: 'locked' });
     const card = makeNumberCard();
     room.players[pid].card = card;
     if (cb) cb({ ok: true, card });
+  });
+
+  socket.on('player:call', (value) => {
+    const room = rooms[socket.data.roomCode];
+    const pid = socket.data.pid;
+    if (!room || room.mode !== 'turns' || room.status !== 'playing') return;
+    doCall(room, pid, parseInt(value, 10), false);
   });
 
   socket.on('player:react', (emoji) => {

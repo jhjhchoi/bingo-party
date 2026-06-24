@@ -212,3 +212,19 @@ button.go { background: linear-gradient(135deg, var(--accent), #ff8a5e); font-si
   background: var(--bg2); border: 1px solid var(--line); color: var(--text); border-radius: 999px;
 }
 .mini-toggle.off { color: var(--muted); }
+
+/* ---- turn-based mode ---- */
+.turn-box {
+  background: var(--bg2); border: 1px solid var(--line); border-radius: 14px;
+  padding: 12px 14px; text-align: center; font-weight: 700; margin-bottom: 12px;
+}
+.turn-box.my {
+  background: linear-gradient(135deg, #2ecc71, #27ae60); color: #fff; border-color: #27ae60;
+  box-shadow: 0 6px 20px rgba(46,204,113,.45); animation: turnpulse 1s ease-in-out infinite;
+}
+@keyframes turnpulse { 0%,100% { box-shadow: 0 6px 18px rgba(46,204,113,.35); } 50% { box-shadow: 0 6px 28px rgba(46,204,113,.7); } }
+.cell.callable {
+  cursor: pointer; border-color: #2ecc71; color: #2ecc71;
+  box-shadow: 0 0 0 2px rgba(46,204,113,.55), 0 0 14px rgba(46,204,113,.35);
+  animation: hotpulse 1.2s ease-in-out infinite;
+}

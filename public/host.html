@@ -19,9 +19,16 @@
     <div class="center" style="margin-bottom:10px"><div class="title-emoji">🎙️</div><h1>호스트 설정</h1></div>
     <label>게임 모드</label>
     <select id="mode">
-      <option value="numbers">숫자 빙고 (1~75 · 공식 B-I-N-G-O 룰)</option>
-      <option value="words">커스텀 단어 빙고</option>
+      <option value="numbers">① 자동 호출 빙고 (1~75 · 공식 B-I-N-G-O 룰)</option>
+      <option value="turns">② 턴제 빙고 (참가자가 돌아가며 호출)</option>
+      <option value="words">③ 커스텀 단어 빙고</option>
     </select>
+
+    <div id="turnOpts" class="hidden">
+      <label>턴 제한 시간 (초) — 시간 초과 시 자동 호출</label>
+      <select id="turnSec"><option>10</option><option selected>15</option><option>20</option><option>30</option><option>45</option></select>
+      <p class="muted" style="font-size:13px">※ 참가자가 자기 차례에 본인 판의 숫자를 눌러 모두에게 호출합니다.</p>
+    </div>
 
     <div id="wordOpts" class="hidden">
       <label>카테고리 (참가자에게 안내)</label>
@@ -34,7 +41,7 @@
     </div>
 
     <div class="grid2">
-      <div>
+      <div id="intervalOpt">
         <label>자동 호출 간격 (초)</label>
         <select id="intervalSec"><option>2</option><option>3</option><option selected>4</option><option>5</option><option>7</option><option>10</option></select>
       </div>
@@ -77,8 +84,9 @@
   <!-- PLAY (project this on the big screen) -->
   <div id="playView" class="hidden">
     <div id="winBox" class="banner hidden"></div>
+    <div id="turnBox" class="turn-box hidden"></div>
     <div class="card center" style="padding:14px">
-      <div class="muted">방금 호출</div>
+      <div class="muted" id="callCaption">방금 호출</div>
       <div class="ball-stage">
         <div class="ball" id="ball"><span id="bigCall">–</span></div>
       </div>
@@ -94,6 +102,7 @@
     </div>
     <div class="row">
       <button id="voiceBtn">🔊 음성 호출: 켜짐</button>
+      <button class="alt hidden" id="skipBtn">⏭️ 차례 넘기기</button>
       <button class="alt" id="resetBtn">새 게임 준비 🔄</button>
     </div>
   </div>
@@ -132,7 +141,12 @@ function setVoice(on){
   $('voiceBtn').classList.toggle('alt', !on);
 }
 
-$('mode').onchange = () => $('wordOpts').classList.toggle('hidden', $('mode').value !== 'words');
+$('mode').onchange = () => {
+  const m = $('mode').value;
+  $('wordOpts').classList.toggle('hidden', m !== 'words');
+  $('turnOpts').classList.toggle('hidden', m !== 'turns');
+  $('intervalOpt').classList.toggle('hidden', m !== 'numbers');
+};
 
 // restore host session
 const savedCode = sessionStorage.getItem('hostCode');
@@ -141,6 +155,7 @@ $('createBtn').onclick = () => {
   const cfg = {
     mode: $('mode').value,
     intervalSec: $('intervalSec').value,
+    turnSec: $('turnSec').value,
     linesToWin: $('linesToWin').value,
     wordsPerPlayer: $('wordsPerPlayer').value,
     category: $('category').value,
@@ -207,7 +222,7 @@ function enterPlay(){
 
 $('resetBtn').onclick = () => {
   socket.emit('host:reset', (res) => {
-    if (res && res.ok) { $('winBox').classList.add('hidden'); $('bigCall').textContent='–'; enterLobby(room); }
+    if (res && res.ok) { endTurnUI(); $('winBox').classList.add('hidden'); $('callCaption').textContent='방금 호출'; $('bigCall').textContent='–'; enterLobby(room); }
   });
 };
 
@@ -219,6 +234,14 @@ socket.on('room:update', (r) => {
   if (r.status === 'playing' && $('playView').classList.contains('hidden')) enterPlay();
   $('calledCount').textContent = r.called.length;
   $('calledList').innerHTML = renderChips(r.called);
+  // turn-based: keep skip visible and show current turn if we missed the game:turn event
+  if (r.mode === 'turns' && r.status === 'playing') {
+    $('skipBtn').classList.remove('hidden');
+    if ($('turnBox').classList.contains('hidden') && r.currentPid) {
+      const cur = r.players.find(p => p.pid === r.currentPid);
+      if (cur) { $('turnBox').textContent = '🎯 ' + cur.name + ' 님 차례'; $('turnBox').classList.remove('hidden'); }
+    }
+  }
 });
 
 // ---- ball drop ----
@@ -233,10 +256,25 @@ function dropBall(v){
 socket.on('game:call', (d) => {
   dropBall(d.value);
   if (window.Sound) Sound.draw();
+  $('callCaption').textContent = d.by ? (d.by + ' 호출' + (d.auto ? ' (시간초과 자동)' : '')) : '방금 호출';
   $('calledCount').textContent = d.called.length;
   $('calledList').innerHTML = renderChips(d.called);
   setTimeout(() => sayCall(d.value), 380); // let the ball land first
 });
+
+// ---- turn-based mode ----
+let hostTurnTimer = null;
+socket.on('game:turn', (d) => {
+  $('skipBtn').classList.remove('hidden');
+  $('turnBox').classList.remove('hidden');
+  let left = d.turnSec;
+  const render = () => { $('turnBox').innerHTML = '🎯 <b>' + escapeHtml(d.name) + '</b> 님 차례 · 남은 시간 ' + left + '초'; };
+  render();
+  if (hostTurnTimer) clearInterval(hostTurnTimer);
+  hostTurnTimer = setInterval(() => { left = Math.max(0, left - 1); render(); if (left <= 0) clearInterval(hostTurnTimer); }, 1000);
+});
+$('skipBtn').onclick = () => socket.emit('host:skipTurn');
+function endTurnUI(){ if (hostTurnTimer) clearInterval(hostTurnTimer); $('turnBox').classList.add('hidden'); $('skipBtn').classList.add('hidden'); }
 
 socket.on('game:winners', (w) => {
   $('winBox').classList.remove('hidden');
@@ -256,9 +294,13 @@ socket.on('reaction', (d) => {
   setTimeout(() => el.remove(), 2600);
 });
 socket.on('game:end', (d) => {
+  endTurnUI();
   if (d.winners && d.winners.length) {
     $('winBox').classList.remove('hidden');
     $('winBox').textContent = '🏆 우승: ' + d.winners.map(x=>x.name).join(', ');
+  } else if (d.reason === 'no-active-players') {
+    $('winBox').classList.remove('hidden');
+    $('winBox').textContent = '게임 종료 — 호출할 참가자가 없습니다.';
   }
 });
 
