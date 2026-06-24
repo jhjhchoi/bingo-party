@@ -46,6 +46,7 @@
   <!-- GAME -->
   <div id="gameView" class="hidden">
     <div id="winBanner" class="banner hidden">🎉 빙고! 우승을 축하합니다!</div>
+    <div id="reachBanner" class="reach-banner hidden">⚡ 리치! 한 칸 남았어요</div>
     <div class="statline">
       <span class="pill">👤 <b id="myName"></b></span>
       <span class="pill">👥 <b id="playerCount">0</b>명</span>
@@ -71,19 +72,28 @@
       <div class="muted" style="font-size:13px;margin-bottom:6px">호출된 항목</div>
       <div class="called-list" id="calledList"></div>
     </div>
+    <div class="card" style="padding:12px;">
+      <div class="muted" style="font-size:13px;margin-bottom:8px">반응 보내기 — 모두의 화면에 떠올라요!</div>
+      <div class="emoji-bar" id="emojiBar">
+        <button>👏</button><button>😂</button><button>🎉</button><button>😮</button>
+        <button>🔥</button><button>❤️</button><button>😭</button><button>👍</button>
+      </div>
+    </div>
   </div>
 
   <div class="app-footer">made with <span class="heart">♥</span> by <b>GOGO STUDIO</b></div>
 </div>
 
 <div class="toast" id="toast"></div>
+<div id="reactions" class="reactions-layer"></div>
 <canvas id="confetti" style="position:fixed;inset:0;pointer-events:none;z-index:40;display:none"></canvas>
 
+<script src="/sounds.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <script>
 const socket = io();
 const $ = (id) => document.getElementById(id);
-let state = { code: null, pid: null, name: '', mode: 'numbers', card: null, calledSet: new Set(), needLines: 3, intervalSec: 4 };
+let state = { code: null, pid: null, name: '', mode: 'numbers', card: null, calledSet: new Set(), needLines: 3, intervalSec: 4, won: false };
 
 // restore pid per room
 function pidKey(code){ return 'bingoPid:' + code; }
@@ -117,6 +127,7 @@ function doJoin(){
   if (code.length !== 4) return alert('4자리 방 코드를 입력하세요.');
   if (!name) return alert('닉네임을 입력하세요.');
   state.code = code;
+  if (window.Sound) Sound.unlock();
   const savedPid = localStorage.getItem(pidKey(code)) || null;
   socket.emit('player:join', { code, name, pid: savedPid }, (res) => {
     if (!res || !res.ok) {
@@ -214,8 +225,8 @@ function renderBoard(){
 }
 function tryDaub(div){
   const v = div.dataset.val;
-  if (state.calledSet.has(v)) { daubed.add(v); cellState(div); }
-  else { div.animate([{transform:'translateX(-3px)'},{transform:'translateX(3px)'},{transform:'translateX(0)'}],{duration:160}); }
+  if (state.calledSet.has(v) && !daubed.has(v)) { daubed.add(v); cellState(div); if (window.Sound) Sound.daub(); }
+  else if (!state.calledSet.has(v)) { div.animate([{transform:'translateX(-3px)'},{transform:'translateX(3px)'},{transform:'translateX(0)'}],{duration:160}); }
 }
 function refreshCalled(called){
   state.calledSet = new Set(called.map(String));
@@ -226,7 +237,23 @@ function refreshCalled(called){
 }
 function updateLines(lines, won){
   $('myLines').textContent = lines;
-  if (won) { $('winBanner').classList.remove('hidden'); fireConfetti(); }
+  if (won && !state.won) {
+    state.won = true;
+    $('reachBanner').classList.add('hidden');
+    $('winBanner').classList.remove('hidden');
+    fireConfetti();
+    if (window.Sound) Sound.win();
+  }
+}
+function updateReach(reach, waiting){
+  const banner = $('reachBanner');
+  if (reach && !state.won) {
+    const w = (waiting || []).slice(0, 4).map(label).join(', ');
+    banner.innerHTML = '⚡ 리치! 이 번호만 나오면 빙고 → <b>' + (w || '') + '</b>';
+    banner.classList.remove('hidden');
+  } else {
+    banner.classList.add('hidden');
+  }
 }
 
 // ---- countdown ----
@@ -255,7 +282,7 @@ function renderMiniBoard(players){
     return `<div class="lb-row" style="${me?'background:rgba(91,140,255,.15);border-radius:8px;':''}">
       <span style="width:22px;text-align:center">${rank}</span>
       <span class="dot ${p.online?'':'off'}"></span>
-      <span class="lb-name">${escapeHtml(p.name)}${me?' <span class="muted">(나)</span>':''}</span>
+      <span class="lb-name">${escapeHtml(p.name)}${me?' <span class="muted">(나)</span>':''}${p.reach&&!p.won?' <span class="reach-badge">🔥</span>':''}</span>
       <span class="lb-lines">${p.lines}줄</span></div>`;
   }).join('') || '<p class="muted">참가자 없음</p>';
 }
@@ -266,11 +293,18 @@ socket.on('room:update', (r) => {
   renderMiniBoard(r.players);
   if (r.status === 'ended') stopCountdown();
 });
-socket.on('player:card', (d) => { state.card = d.card; state.mode = d.mode; daubed = new Set(); renderBoard(); show('gameView'); startCountdown(); });
+socket.on('player:card', (d) => { state.card = d.card; state.mode = d.mode; state.won = false; daubed = new Set(); $('reachBanner').classList.add('hidden'); renderBoard(); show('gameView'); startCountdown(); });
 socket.on('game:call', (d) => { refreshCalled(d.called); startCountdown(); });
-socket.on('player:state', (d) => { refreshCalled(d.called); updateLines(d.lines, d.won); });
+socket.on('player:state', (d) => { refreshCalled(d.called); updateLines(d.lines, d.won); updateReach(d.reach, d.waiting); });
+socket.on('player:reach', (d) => {
+  if (window.Sound) Sound.reach();
+  updateReach(true, d.waiting);
+  $('reachBanner').animate([{transform:'scale(1)'},{transform:'scale(1.06)'},{transform:'scale(1)'}], {duration:420});
+  toast('⚡ 리치! 한 칸 남았어요!');
+});
 socket.on('game:winners', (w) => showWinners(w));
-socket.on('game:reset', () => { toast('새 게임을 준비합니다.'); daubed = new Set(); stopCountdown(); show('lobbyView'); $('winBanner').classList.add('hidden'); });
+socket.on('reaction', (d) => floatEmoji(d.emoji));
+socket.on('game:reset', () => { toast('새 게임을 준비합니다.'); daubed = new Set(); state.won = false; stopCountdown(); show('lobbyView'); $('winBanner').classList.add('hidden'); $('reachBanner').classList.add('hidden'); });
 socket.on('game:end', (d) => { stopCountdown(); if (d.winners && d.winners.length) showWinners(d.winners); });
 
 function showWinners(winners){
@@ -302,6 +336,20 @@ function fireConfetti(){
       ctx.fillRect(p.x,p.y,p.r,p.r);});
     t++; if (t<240) requestAnimationFrame(loop); else { cv.style.display='none'; }
   })();
+}
+
+// ---- emoji reactions ----
+$('emojiBar').querySelectorAll('button').forEach(b => {
+  b.onclick = () => { socket.emit('player:react', b.textContent); if (window.Sound) Sound.pop(); floatEmoji(b.textContent); };
+});
+function floatEmoji(emoji){
+  const layer = $('reactions');
+  const el = document.createElement('div');
+  el.className = 'float-emoji'; el.textContent = emoji;
+  el.style.left = (6 + Math.random() * 86) + 'vw';
+  el.style.fontSize = (24 + Math.random() * 20) + 'px';
+  layer.appendChild(el);
+  setTimeout(() => el.remove(), 2400);
 }
 </script>
 </body>

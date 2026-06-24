@@ -105,12 +105,28 @@ function countLines(card, calledSet) {
   return lines;
 }
 
+// "Reach": one uncalled number away from winning. Returns the numbers that would win.
+function reachInfo(card, calledSet, linesToWin) {
+  if (countLines(card, calledSet) >= linesToWin) return { reach: false, waiting: [] };
+  const waiting = new Set();
+  for (let r = 0; r < 5; r++) {
+    for (let c = 0; c < 5; c++) {
+      const v = card[r][c];
+      if (v === FREE || calledSet.has(v)) continue;
+      const test = new Set(calledSet); test.add(v);
+      if (countLines(card, test) >= linesToWin) waiting.add(v);
+    }
+  }
+  return { reach: waiting.size > 0, waiting: [...waiting] };
+}
+
 function publicPlayers(room) {
   return Object.values(room.players).map((p) => ({
     pid: p.pid,
     name: p.name,
     lines: p.lines || 0,
     won: !!p.won,
+    reach: !!p.reach,
     online: !!p.socketId,
     wordCount: (p.submittedWords || []).length,
   }));
@@ -168,8 +184,12 @@ function startCalling(room) {
         p.wonAtCall = room.called.length;
         newWinners.push({ pid: p.pid, name: p.name, lines: p.lines, atCall: p.wonAtCall });
       }
+      const ri = reachInfo(p.card, room.calledSet, room.settings.linesToWin);
+      const wasReach = p.reach;
+      p.reach = ri.reach && !p.won;
       if (p.socketId) {
-        io.to(p.socketId).emit('player:state', { lines: p.lines, won: p.won, called: room.called });
+        io.to(p.socketId).emit('player:state', { lines: p.lines, won: p.won, called: room.called, reach: p.reach, waiting: ri.waiting });
+        if (p.reach && !wasReach) io.to(p.socketId).emit('player:reach', { waiting: ri.waiting });
       }
     }
     if (newWinners.length) {
@@ -346,6 +366,18 @@ io.on('connection', (socket) => {
     room.players[pid].submittedWords = clean;
     broadcastRoom(room);
     if (cb) cb({ ok: true, submittedWords: clean });
+  });
+
+  socket.on('player:react', (emoji) => {
+    const code = socket.data.roomCode;
+    const pid = socket.data.pid;
+    const room = rooms[code];
+    if (!room || !room.players[pid]) return;
+    const allowed = ['👏', '😂', '🎉', '😮', '🔥', '❤️', '😭', '👍'];
+    const e = allowed.includes(emoji) ? emoji : '🎉';
+    const payload = { emoji: e, name: room.players[pid].name };
+    io.to('host:' + code).emit('reaction', payload);
+    io.to('room:' + code).emit('reaction', payload);
   });
 
   socket.on('disconnect', () => {

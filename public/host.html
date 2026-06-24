@@ -79,7 +79,9 @@
     <div id="winBox" class="banner hidden"></div>
     <div class="card center" style="padding:14px">
       <div class="muted">방금 호출</div>
-      <div class="bigcall" id="bigCall">–</div>
+      <div class="ball-stage">
+        <div class="ball" id="ball"><span id="bigCall">–</span></div>
+      </div>
       <div class="muted" style="font-size:13px">총 <span id="calledCount">0</span>회 호출 · 방 <b id="codeSmall"></b></div>
     </div>
     <div class="card">
@@ -99,6 +101,9 @@
   <div class="app-footer">made with <span class="heart">♥</span> by <b>GOGO STUDIO</b></div>
 </div>
 
+<div id="reactions" class="reactions-layer"></div>
+
+<script src="/sounds.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <script>
@@ -197,6 +202,7 @@ $('voiceBtn').onclick = () => setVoice(!voiceOn);
 
 $('startBtn').onclick = () => {
   // a user gesture is required to unlock browser audio — prime it here
+  if (window.Sound) Sound.unlock();
   if ('speechSynthesis' in window) { speechSynthesis.resume(); speak("Let's play bingo!"); }
   socket.emit('host:start', (res) => {
     if (!res || !res.ok) {
@@ -229,17 +235,39 @@ socket.on('room:update', (r) => {
   $('calledList').innerHTML = renderChips(r.called);
 });
 
+// ---- ball drop ----
+const BALL_COLORS = { B:'#5b8cff', I:'#ff5e7e', N:'#2ecc71', G:'#ffb938', O:'#b07bff' };
+function dropBall(v){
+  const ball = $('ball'); const L = letterFor(v);
+  ball.style.background = BALL_COLORS[L] || 'var(--gold)';
+  $('bigCall').textContent = label(v);
+  ball.classList.remove('drop'); void ball.offsetWidth; ball.classList.add('drop');
+}
+
 socket.on('game:call', (d) => {
-  $('bigCall').textContent = label(d.value);
+  dropBall(d.value);
+  if (window.Sound) Sound.draw();
   $('calledCount').textContent = d.called.length;
   $('calledList').innerHTML = renderChips(d.called);
-  sayCall(d.value);
+  setTimeout(() => sayCall(d.value), 380); // let the ball land first
 });
 
 socket.on('game:winners', (w) => {
   $('winBox').classList.remove('hidden');
   $('winBox').textContent = '🏆 우승: ' + w.map(x=>`${x.name} (${x.atCall}회만에 ${x.lines}줄)`).join(', ');
+  if (window.Sound) Sound.win();
   speak('Bingo! Bingo! We have a winner!');
+});
+
+// ---- floating emoji reactions ----
+socket.on('reaction', (d) => {
+  const layer = $('reactions');
+  const el = document.createElement('div');
+  el.className = 'float-emoji'; el.textContent = d.emoji;
+  el.style.left = (6 + Math.random() * 86) + 'vw';
+  el.style.fontSize = (30 + Math.random() * 30) + 'px';
+  layer.appendChild(el);
+  setTimeout(() => el.remove(), 2600);
 });
 socket.on('game:end', (d) => {
   if (d.winners && d.winners.length) {
@@ -252,7 +280,7 @@ function renderLeaderboard(r){
   const sorted = [...r.players].sort((a,b)=> (b.lines-a.lines) || a.name.localeCompare(b.name));
   $('leaderboard').innerHTML = sorted.map((p,i)=>
     `<div class="lb-row"><span style="width:22px">${p.won?'🏆':(i+1)}</span>
-     <span class="lb-name">${escapeHtml(p.name)}</span>
+     <span class="lb-name">${escapeHtml(p.name)}${p.reach&&!p.won?' <span class="reach-badge">🔥 리치</span>':''}</span>
      <span class="lb-lines">${p.lines}줄</span></div>`
   ).join('') || '<p class="muted">참가자 없음</p>';
 }

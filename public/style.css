@@ -162,3 +162,46 @@ button.go { background: linear-gradient(135deg, var(--accent), #ff8a5e); font-si
   border-color: #7aa2ff; color: #fff; font-weight: 800;
 }
 .cell.free span { font-size: clamp(11px, 3.4vw, 15px); letter-spacing: 1px; }
+
+/* ---- ball drop (host) ---- */
+.ball-stage { height: 150px; display: flex; align-items: center; justify-content: center; }
+.ball {
+  width: 124px; height: 124px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--gold); color: #fff; position: relative;
+  box-shadow: inset -10px -12px 24px rgba(0,0,0,.28), inset 8px 8px 18px rgba(255,255,255,.4), 0 12px 26px rgba(0,0,0,.4);
+}
+.ball span { font-size: clamp(32px, 9vw, 50px); font-weight: 900; text-shadow: 0 2px 5px rgba(0,0,0,.4); }
+.ball::before {
+  content: ""; position: absolute; top: 14px; left: 22px; width: 32px; height: 22px; border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(255,255,255,.85), transparent);
+}
+.ball.drop { animation: balldrop .6s cubic-bezier(.3,.85,.4,1); }
+@keyframes balldrop {
+  0%   { transform: translateY(-230px) rotate(-240deg) scale(.8); opacity: 0; }
+  55%  { transform: translateY(16px) rotate(10deg) scale(1.05); opacity: 1; }
+  72%  { transform: translateY(-8px) rotate(-5deg); }
+  100% { transform: translateY(0) rotate(0) scale(1); }
+}
+
+/* ---- reach (텐션) ---- */
+.reach-banner {
+  background: linear-gradient(135deg, #ff8a00, #ff5e7e); color: #fff;
+  border-radius: 14px; padding: 12px 14px; font-weight: 800; text-align: center; margin-bottom: 12px;
+  box-shadow: 0 6px 18px rgba(255,94,126,.4); animation: reachpulse 1s ease-in-out infinite;
+}
+.reach-banner b { color: #fff2c2; }
+@keyframes reachpulse { 0%,100% { box-shadow: 0 6px 18px rgba(255,94,126,.3); } 50% { box-shadow: 0 6px 28px rgba(255,138,0,.7); } }
+.reach-badge { background: #ff5e7e; color: #fff; font-size: 11px; font-weight: 800; padding: 2px 7px; border-radius: 999px; }
+
+/* ---- emoji reactions ---- */
+.reactions-layer { position: fixed; inset: 0; pointer-events: none; z-index: 45; overflow: hidden; }
+.float-emoji { position: absolute; bottom: 6vh; animation: floatup 2.4s ease-out forwards; will-change: transform, opacity; }
+@keyframes floatup {
+  0%   { transform: translateY(0) scale(.6); opacity: 0; }
+  15%  { transform: translateY(-6vh) scale(1.1); opacity: 1; }
+  100% { transform: translateY(-72vh) scale(1); opacity: 0; }
+}
+.emoji-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.emoji-bar button { background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 0; font-size: 22px; width: 100%; }
+.emoji-bar button:active { transform: scale(1.18); background: var(--card); }
