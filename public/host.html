@@ -19,7 +19,7 @@
     <div class="center" style="margin-bottom:10px"><div class="title-emoji">🎙️</div><h1>호스트 설정</h1></div>
     <label>게임 모드</label>
     <select id="mode">
-      <option value="numbers">숫자 빙고 (1~100)</option>
+      <option value="numbers">숫자 빙고 (1~75 · 공식 B-I-N-G-O 룰)</option>
       <option value="words">커스텀 단어 빙고</option>
     </select>
 
@@ -91,6 +91,7 @@
       <div class="called-list" id="calledList"></div>
     </div>
     <div class="row">
+      <button id="voiceBtn">🔊 음성 호출: 켜짐</button>
       <button class="alt" id="resetBtn">새 게임 준비 🔄</button>
     </div>
   </div>
@@ -104,6 +105,41 @@
 const socket = io();
 const $ = (id) => document.getElementById(id);
 let room = null;
+
+// ---- labels (official 75-ball: B 1-15, I 16-30, N 31-45, G 46-60, O 61-75) ----
+function letterFor(v){
+  if (!room || room.mode !== 'numbers') return '';
+  v = +v;
+  if (v <= 15) return 'B'; if (v <= 30) return 'I'; if (v <= 45) return 'N'; if (v <= 60) return 'G'; return 'O';
+}
+function label(v){ const L = letterFor(v); return L ? (L + '-' + v) : v; }
+function renderChips(called){ return called.map(v=>`<span class="chip">${label(v)}</span>`).join(''); }
+
+// ---- voice caller (the "성우" kick) ----
+let voiceOn = true, voices = [];
+function loadVoices(){ try { voices = speechSynthesis.getVoices(); } catch(e){} }
+loadVoices();
+if ('speechSynthesis' in window) speechSynthesis.onvoiceschanged = loadVoices;
+function speak(text){
+  if (!voiceOn || !('speechSynthesis' in window)) return;
+  const u = new SpeechSynthesisUtterance(text);
+  const en = voices.find(v=>/en[-_]US/i.test(v.lang)) || voices.find(v=>/^en/i.test(v.lang));
+  if (en) u.voice = en;
+  u.lang = en ? en.lang : 'en-US';
+  u.rate = 0.92; u.pitch = 1.05;
+  speechSynthesis.cancel();
+  speechSynthesis.speak(u);
+}
+function sayCall(v){
+  const L = letterFor(v);
+  speak(L ? (L + ' ' + v + '... ' + L + ' ' + v) : String(v)); // "G 52... G 52"
+}
+function setVoice(on){
+  voiceOn = on;
+  $('voiceBtn').textContent = on ? '🔊 음성 호출: 켜짐' : '🔇 음성 호출: 꺼짐';
+  $('voiceBtn').classList.toggle('alt', !on);
+  if (!on && 'speechSynthesis' in window) speechSynthesis.cancel();
+}
 
 $('mode').onchange = () => $('wordOpts').classList.toggle('hidden', $('mode').value !== 'words');
 
@@ -157,7 +193,11 @@ function renderRoom(r){
   }
 }
 
+$('voiceBtn').onclick = () => setVoice(!voiceOn);
+
 $('startBtn').onclick = () => {
+  // a user gesture is required to unlock browser audio — prime it here
+  if ('speechSynthesis' in window) { speechSynthesis.resume(); speak("Let's play bingo!"); }
   socket.emit('host:start', (res) => {
     if (!res || !res.ok) {
       if (res && res.error === 'need-words') return alert(`고유 단어가 부족합니다. (현재 ${res.have} / 25개 필요)`);
@@ -186,18 +226,20 @@ socket.on('room:update', (r) => {
   renderLeaderboard(r);
   if (r.status === 'playing' && $('playView').classList.contains('hidden')) enterPlay();
   $('calledCount').textContent = r.called.length;
-  $('calledList').innerHTML = r.called.map(v=>`<span class="chip">${v}</span>`).join('');
+  $('calledList').innerHTML = renderChips(r.called);
 });
 
 socket.on('game:call', (d) => {
-  $('bigCall').textContent = d.value;
+  $('bigCall').textContent = label(d.value);
   $('calledCount').textContent = d.called.length;
-  $('calledList').innerHTML = d.called.map(v=>`<span class="chip">${v}</span>`).join('');
+  $('calledList').innerHTML = renderChips(d.called);
+  sayCall(d.value);
 });
 
 socket.on('game:winners', (w) => {
   $('winBox').classList.remove('hidden');
   $('winBox').textContent = '🏆 우승: ' + w.map(x=>`${x.name} (${x.atCall}회만에 ${x.lines}줄)`).join(', ');
+  speak('Bingo! Bingo! We have a winner!');
 });
 socket.on('game:end', (d) => {
   if (d.winners && d.winners.length) {

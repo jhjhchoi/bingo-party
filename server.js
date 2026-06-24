@@ -50,31 +50,55 @@ function shuffle(arr) {
   return a;
 }
 
-function makeCard(pool) {
-  // pick 25 distinct values, arrange into 5x5
+const FREE = '★';
+// Official 75-ball bingo column ranges: B 1-15, I 16-30, N 31-45, G 46-60, O 61-75.
+const COL_RANGES = [[1, 15], [16, 30], [31, 45], [46, 60], [61, 75]];
+
+function makeNumberCard() {
+  const cols = COL_RANGES.map(([lo, hi]) => {
+    const nums = [];
+    for (let n = lo; n <= hi; n++) nums.push(n);
+    return shuffle(nums).slice(0, 5);
+  });
+  const card = [];
+  for (let r = 0; r < 5; r++) {
+    const row = [];
+    for (let c = 0; c < 5; c++) row.push(cols[c][r]);
+    card.push(row);
+  }
+  card[2][2] = FREE; // free center space, always marked
+  return card;
+}
+
+function makeWordCard(pool) {
   const picked = shuffle(pool).slice(0, 25);
   const card = [];
   for (let r = 0; r < 5; r++) card.push(picked.slice(r * 5, r * 5 + 5));
   return card;
 }
 
+function makeCardForRoom(room) {
+  return room.mode === 'numbers' ? makeNumberCard() : makeWordCard(room.pool);
+}
+
 function countLines(card, calledSet) {
+  const marked = (v) => v === FREE || calledSet.has(v); // free center always counts
   let lines = 0;
   // rows
   for (let r = 0; r < 5; r++) {
-    if (card[r].every((v) => calledSet.has(v))) lines++;
+    if (card[r].every(marked)) lines++;
   }
   // cols
   for (let c = 0; c < 5; c++) {
     let ok = true;
-    for (let r = 0; r < 5; r++) if (!calledSet.has(card[r][c])) { ok = false; break; }
+    for (let r = 0; r < 5; r++) if (!marked(card[r][c])) { ok = false; break; }
     if (ok) lines++;
   }
   // diagonals
   let d1 = true, d2 = true;
   for (let i = 0; i < 5; i++) {
-    if (!calledSet.has(card[i][i])) d1 = false;
-    if (!calledSet.has(card[i][4 - i])) d2 = false;
+    if (!marked(card[i][i])) d1 = false;
+    if (!marked(card[i][4 - i])) d2 = false;
   }
   if (d1) lines++;
   if (d2) lines++;
@@ -188,7 +212,7 @@ io.on('connection', (socket) => {
         category: (cfg.category || '').toString().slice(0, 60),
       },
       players: {},
-      pool: mode === 'numbers' ? Array.from({ length: 100 }, (_, i) => i + 1) : [],
+      pool: mode === 'numbers' ? Array.from({ length: 75 }, (_, i) => i + 1) : [],
       callOrder: [],
       called: [],
       calledSet: new Set(),
@@ -231,7 +255,7 @@ io.on('connection', (socket) => {
     }
     // (re)generate cards for everyone now that pool is final
     for (const p of Object.values(room.players)) {
-      p.card = makeCard(room.pool);
+      p.card = makeCardForRoom(room);
       p.lines = 0;
       p.won = false;
       if (p.socketId) io.to(p.socketId).emit('player:card', { card: p.card, mode: room.mode });
@@ -278,7 +302,7 @@ io.on('connection', (socket) => {
         pid,
         name: (data.name || 'Player').toString().slice(0, 20),
         socketId: socket.id,
-        card: room.status === 'playing' ? makeCard(room.pool) : null,
+        card: room.status === 'playing' ? makeCardForRoom(room) : null,
         won: false,
         lines: 0,
         submittedWords: [],

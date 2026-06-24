@@ -58,6 +58,7 @@
       </div>
       <div class="bigcall" id="bigCall">–</div>
     </div>
+    <div id="bingoHeader" class="bingo-header hidden"><span>B</span><span>I</span><span>N</span><span>G</span><span>O</span></div>
     <div class="board" id="board"></div>
     <div class="card" style="margin-top:14px;">
       <div class="statline" style="margin:0 0 6px">
@@ -141,7 +142,7 @@ function applyServerState(res){
   if (res.settings) { state.intervalSec = res.settings.intervalSec || state.intervalSec; state.needLines = res.settings.linesToWin || state.needLines; }
   if (state.name) { $('myName').textContent = state.name; $('lobbyMyName').textContent = state.name; }
   $('needLines').textContent = state.needLines;
-  state.calledSet = new Set(res.called || []);
+  state.calledSet = new Set((res.called || []).map(String));
 
   if (res.status === 'collecting' && res.mode === 'words') {
     renderWordInputs(res.settings.wordsPerPlayer, res.settings.category, res.submittedWords);
@@ -177,30 +178,51 @@ $('submitWords').onclick = () => {
   });
 };
 
+// ---- labels (official 75-ball: B 1-15, I 16-30, N 31-45, G 46-60, O 61-75) ----
+function letterFor(v){
+  if (state.mode !== 'numbers') return '';
+  v = +v;
+  if (v <= 15) return 'B'; if (v <= 30) return 'I'; if (v <= 45) return 'N'; if (v <= 60) return 'G'; return 'O';
+}
+function label(v){ const L = letterFor(v); return L ? (L + '-' + v) : v; }
+
 // ---- board ----
+let daubed = new Set(); // values the player has tapped to mark (strings)
+function cellState(div){
+  const v = div.dataset.val;
+  if (v === '★') return; // free center stays marked
+  div.classList.remove('hot','daubed');
+  if (daubed.has(v)) div.classList.add('daubed');
+  else if (state.calledSet.has(v)) div.classList.add('hot'); // called but not yet daubed → "tap me!"
+}
 function renderBoard(){
+  $('bingoHeader').classList.toggle('hidden', state.mode !== 'numbers');
   const b = $('board'); b.innerHTML = '';
   for (let r=0;r<5;r++) for (let c=0;c<5;c++){
-    const v = state.card[r][c];
+    const v = String(state.card[r][c]);
     const div = document.createElement('div');
-    div.className = 'cell' + (state.calledSet.has(v) ? ' called' : '');
-    div.textContent = v;
     div.dataset.val = v;
-    div.onclick = () => div.classList.toggle('tapped'); // purely visual daub
+    if (v === '★') { div.className = 'cell free'; div.innerHTML = '<span>FREE</span>'; }
+    else {
+      div.className = 'cell';
+      div.textContent = v;
+      div.onclick = () => tryDaub(div);
+      cellState(div);
+    }
     b.appendChild(div);
   }
 }
-function markCell(v){
-  document.querySelectorAll('.cell').forEach(el => {
-    if (String(el.dataset.val) === String(v)) el.classList.add('called');
-  });
+function tryDaub(div){
+  const v = div.dataset.val;
+  if (state.calledSet.has(v)) { daubed.add(v); cellState(div); }
+  else { div.animate([{transform:'translateX(-3px)'},{transform:'translateX(3px)'},{transform:'translateX(0)'}],{duration:160}); }
 }
 function refreshCalled(called){
-  state.calledSet = new Set(called);
+  state.calledSet = new Set(called.map(String));
   $('calledCount').textContent = called.length;
-  $('calledList').innerHTML = called.map(v=>`<span class="chip">${v}</span>`).join('');
-  if (state.card) called.forEach(markCell);
-  if (called.length) $('bigCall').textContent = called[called.length-1];
+  $('calledList').innerHTML = called.map(v=>`<span class="chip">${label(v)}</span>`).join('');
+  if (state.card) document.querySelectorAll('#board .cell').forEach(cellState);
+  if (called.length) $('bigCall').textContent = label(called[called.length-1]);
 }
 function updateLines(lines, won){
   $('myLines').textContent = lines;
@@ -244,11 +266,11 @@ socket.on('room:update', (r) => {
   renderMiniBoard(r.players);
   if (r.status === 'ended') stopCountdown();
 });
-socket.on('player:card', (d) => { state.card = d.card; state.mode = d.mode; renderBoard(); show('gameView'); startCountdown(); });
-socket.on('game:call', (d) => { $('bigCall').textContent = d.value; markCell(d.value); refreshCalled(d.called); startCountdown(); });
+socket.on('player:card', (d) => { state.card = d.card; state.mode = d.mode; daubed = new Set(); renderBoard(); show('gameView'); startCountdown(); });
+socket.on('game:call', (d) => { refreshCalled(d.called); startCountdown(); });
 socket.on('player:state', (d) => { refreshCalled(d.called); updateLines(d.lines, d.won); });
 socket.on('game:winners', (w) => showWinners(w));
-socket.on('game:reset', () => { toast('새 게임을 준비합니다.'); stopCountdown(); show('lobbyView'); $('winBanner').classList.add('hidden'); });
+socket.on('game:reset', () => { toast('새 게임을 준비합니다.'); daubed = new Set(); stopCountdown(); show('lobbyView'); $('winBanner').classList.add('hidden'); });
 socket.on('game:end', (d) => { stopCountdown(); if (d.winners && d.winners.length) showWinners(d.winners); });
 
 function showWinners(winners){
