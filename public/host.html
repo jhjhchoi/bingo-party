@@ -122,7 +122,7 @@ let room = null;
 
 // ---- labels (official 75-ball: B 1-15, I 16-30, N 31-45, G 46-60, O 61-75) ----
 function letterFor(v){
-  if (!room || room.mode !== 'numbers') return '';
+  if (!room || (room.mode !== 'numbers' && room.mode !== 'turns')) return '';
   v = +v;
   if (v <= 15) return 'B'; if (v <= 30) return 'I'; if (v <= 45) return 'N'; if (v <= 60) return 'G'; return 'O';
 }
